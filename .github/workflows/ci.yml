@@ -1,0 +1,152 @@
+# MLOps CI Pipeline
+# Triggered on push and pull_request events
+# Runs linting, type checking, testing, and infrastructure validation
+
+name: MLOps CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  PYTHON_VERSION: "3.12"
+  POETRY_VERSION: "1.7.1"
+
+jobs:
+  # ============================================
+  # Job 1: Lint and Test
+  # ============================================
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Install project
+        run: poetry install --no-interaction
+
+      - name: Run Ruff linter
+        run: poetry run ruff check .
+
+      - name: Run Ruff formatter check
+        run: poetry run ruff format --check .
+
+      - name: Run MyPy type checker
+        run: poetry run mypy src/
+        continue-on-error: true # Allow to continue while type hints are being added
+
+      - name: Run tests with pytest
+        run: poetry run pytest tests/ -v --tb=short
+        continue-on-error: true # Allow to continue while tests are being added
+
+  # ============================================
+  # Job 2: Infrastructure Validation
+  # ============================================
+  infra-validation:
+    name: Infra Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Start LocalStack
+        uses: localstack/localstack-github-action@main
+        with:
+          image-tag: "latest"
+          install-awslocal: "true"
+
+      - name: Wait for LocalStack
+        run: |
+          echo "Waiting for LocalStack to be ready..."
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"s3\": \"\(running\|available\)\""; do sleep 2; done'
+          echo "LocalStack is ready!"
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure/terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: infrastructure/terraform
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        working-directory: infrastructure/terraform
+        continue-on-error: true
+
+  # ============================================
+  # Job 3: Docker Build Validation
+  # ============================================
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (dev stage)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/docker/Dockerfile
+          target: dev
+          push: false
+          tags: smart-logistics-ml:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Docker image (production stage)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/docker/Dockerfile
+          target: production
+          push: false
+          tags: smart-logistics-ml:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

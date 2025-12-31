@@ -1,0 +1,3 @@
+[core]
+    # Disables DVC's integration with Git or other SCM systems.
+    no_scm = True
