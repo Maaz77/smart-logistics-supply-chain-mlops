@@ -19,7 +19,7 @@ env:
 
 jobs:
   # ============================================
-  # Job 1: Quality Checks
+  # Quality Checks
   # ============================================
   quality:
     name: Quality Checks
@@ -48,7 +48,7 @@ jobs:
           key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install dependencies
-        run: make install
+        run: poetry install --no-interaction
 
       - name: Check code style
         run: make check-style
