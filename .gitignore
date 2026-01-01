@@ -43,12 +43,18 @@ artifacts/
 mlflow.db
 logs/
 .dvc/cache
-/data/raw/*
-/data/processed/*
-/data/external/*
-!/data/raw/.gitkeep
-!/data/processed/.gitkeep
-!/data/external/.gitkeep
+
+# Data folder (synced with S3 smart-logistics-data bucket)
+/data/*
+!/data/.gitkeep
+
+# Models folder (synced with S3 mlflow-model-registry bucket)
+/models/*
+!/models/.gitkeep
+
+# MLflow PostgreSQL data persistence
+/mlflow_db/*
+!/mlflow_db/.gitkeep
 
 # IDEs
 .vscode/

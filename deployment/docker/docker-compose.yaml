@@ -4,6 +4,16 @@
 # All infrastructure services for local ML development
 # Usage: docker compose -f deployment/docker/docker-compose.yaml up -d
 # ============================================
+#
+# Persistent Storage Design:
+# - data/           → synced with s3://smart-logistics-data
+# - models/         → synced with s3://mlflow-model-registry (MLflow artifacts)
+# - mlflow_db/      → PostgreSQL data for MLflow experiments
+#
+# These folders persist after infrastructure is shut down.
+#
+# NOTE: S3 buckets are created by Terraform (make infra-init), not here.
+# ============================================
 
 services:
   # ============================================
@@ -47,7 +57,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Persist PostgreSQL data in project root folder
+      - "../../mlflow_db:/var/lib/postgresql/data"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlflow} -d ${POSTGRES_DB:-mlflow}"]
       interval: 10s
@@ -71,8 +82,8 @@ services:
     environment:
       # MLflow backend store configuration (Postgres)
       MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
-      # MLflow artifact store configuration (S3 via LocalStack)
-      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://ml-artifacts
+      # MLflow artifact store configuration (S3 via LocalStack - model registry bucket)
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://mlflow-model-registry
       # S3 endpoint for LocalStack (container-to-container communication)
       MLFLOW_S3_ENDPOINT_URL: http://localstack:4566
       # AWS credentials for LocalStack
@@ -85,14 +96,4 @@ services:
       --host 0.0.0.0
       --port 5000
       --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
-      --default-artifact-root s3://ml-artifacts"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:5000/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 90s  # Give time for pip install + migrations
-
-volumes:
-  postgres_data:
-    driver: local
+      --default-artifact-root s3://mlflow-model-registry"

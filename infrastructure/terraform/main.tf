@@ -1,38 +1,120 @@
 # Main Terraform Configuration for Smart Logistics ML Infrastructure
 # Provisions S3 buckets and IAM roles in LocalStack for local development
+#
+# IMPORTANT: This configuration is designed for LocalStack ONLY.
+# All AWS resources are simulated locally - no real AWS services are used.
+# Use with tflocal: cd infrastructure/terraform && tflocal apply
+#
+# S3 Bucket Design:
+# - smart-logistics-data:     For raw/processed data, synced with ./data folder
+# - mlflow-model-registry:    For MLflow artifacts, synced with ./models folder
 
 # ============================================
-# S3 Bucket for ML Artifacts
+# Variables
 # ============================================
-resource "aws_s3_bucket" "ml_artifacts" {
-  bucket = "smart-logistics-artifacts"
+variable "localstack_endpoint" {
+  description = "LocalStack endpoint URL for AWS CLI commands"
+  type        = string
+  default     = "http://localhost:4566"
+}
+
+# ============================================
+# S3 Bucket for Data Storage
+# ============================================
+resource "aws_s3_bucket" "smart_logistics_data" {
+  bucket        = "smart-logistics-data"
+  force_destroy = true
 
   tags = {
-    Name        = "Smart Logistics ML Artifacts"
+    Name        = "Smart Logistics Data"
     Environment = "development"
     Project     = "smart-logistics-supply-chain-ml"
     ManagedBy   = "terraform"
+    SyncFolder  = "./data"
   }
 }
 
-# S3 Bucket for MLflow artifacts (used by MLflow server)
-resource "aws_s3_bucket" "mlflow_artifacts" {
-  bucket = "ml-artifacts"
-
-  tags = {
-    Name        = "MLflow Artifacts"
-    Environment = "development"
-    Project     = "smart-logistics-supply-chain-ml"
-    ManagedBy   = "terraform"
-  }
-}
-
-# Enable versioning for the artifacts bucket
-resource "aws_s3_bucket_versioning" "ml_artifacts_versioning" {
-  bucket = aws_s3_bucket.ml_artifacts.id
+# Enable versioning for the data bucket
+resource "aws_s3_bucket_versioning" "smart_logistics_data_versioning" {
+  bucket = aws_s3_bucket.smart_logistics_data.id
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# Sync local data folder to S3 after bucket creation (LocalStack only)
+resource "null_resource" "sync_data_to_s3" {
+  depends_on = [aws_s3_bucket.smart_logistics_data]
+
+  triggers = {
+    bucket_id = aws_s3_bucket.smart_logistics_data.id
+  }
+
+  provisioner "local-exec" {
+    command     = <<-EOT
+      echo "📤 Syncing ./data to s3://smart-logistics-data (LocalStack)..."
+      # Try awslocal first (LocalStack CLI), fallback to aws with endpoint
+      if command -v awslocal &> /dev/null; then
+        awslocal s3 sync ../../data s3://smart-logistics-data \
+          --exclude ".gitkeep" --exclude ".DS_Store" --exclude "*.tmp" 2>/dev/null || true
+      else
+        aws --endpoint-url=${var.localstack_endpoint} s3 sync ../../data s3://smart-logistics-data \
+          --exclude ".gitkeep" --exclude ".DS_Store" --exclude "*.tmp" 2>/dev/null || true
+      fi
+      echo "✅ Data sync complete"
+    EOT
+    working_dir = path.module
+  }
+}
+
+# ============================================
+# S3 Bucket for MLflow Model Registry
+# ============================================
+resource "aws_s3_bucket" "mlflow_model_registry" {
+  bucket        = "mlflow-model-registry"
+  force_destroy = true
+
+  tags = {
+    Name        = "MLflow Model Registry"
+    Environment = "development"
+    Project     = "smart-logistics-supply-chain-ml"
+    ManagedBy   = "terraform"
+    SyncFolder  = "./models"
+  }
+}
+
+# Enable versioning for the model registry bucket
+resource "aws_s3_bucket_versioning" "mlflow_model_registry_versioning" {
+  bucket = aws_s3_bucket.mlflow_model_registry.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Sync local models folder to S3 after bucket creation (LocalStack only)
+resource "null_resource" "sync_models_to_s3" {
+  depends_on = [aws_s3_bucket.mlflow_model_registry]
+
+  triggers = {
+    bucket_id = aws_s3_bucket.mlflow_model_registry.id
+  }
+
+  provisioner "local-exec" {
+    command     = <<-EOT
+      echo "📤 Syncing ./models to s3://mlflow-model-registry (LocalStack)..."
+      # Try awslocal first (LocalStack CLI), fallback to aws with endpoint
+      if command -v awslocal &> /dev/null; then
+        awslocal s3 sync ../../models s3://mlflow-model-registry \
+          --exclude ".gitkeep" --exclude ".DS_Store" --exclude "*.tmp" 2>/dev/null || true
+      else
+        aws --endpoint-url=${var.localstack_endpoint} s3 sync ../../models s3://mlflow-model-registry \
+          --exclude ".gitkeep" --exclude ".DS_Store" --exclude "*.tmp" 2>/dev/null || true
+      fi
+      echo "✅ Models sync complete"
+    EOT
+    working_dir = path.module
   }
 }
 
@@ -81,10 +163,10 @@ resource "aws_iam_role_policy" "mlflow_s3_policy" {
           "s3:ListBucket"
         ]
         Resource = [
-          aws_s3_bucket.ml_artifacts.arn,
-          "${aws_s3_bucket.ml_artifacts.arn}/*",
-          aws_s3_bucket.mlflow_artifacts.arn,
-          "${aws_s3_bucket.mlflow_artifacts.arn}/*"
+          aws_s3_bucket.smart_logistics_data.arn,
+          "${aws_s3_bucket.smart_logistics_data.arn}/*",
+          aws_s3_bucket.mlflow_model_registry.arn,
+          "${aws_s3_bucket.mlflow_model_registry.arn}/*"
         ]
       }
     ]
@@ -94,14 +176,29 @@ resource "aws_iam_role_policy" "mlflow_s3_policy" {
 # ============================================
 # Outputs
 # ============================================
-output "ml_artifacts_bucket_name" {
-  description = "Name of the ML artifacts S3 bucket"
-  value       = aws_s3_bucket.ml_artifacts.id
+output "localstack_endpoint" {
+  description = "LocalStack endpoint URL"
+  value       = var.localstack_endpoint
 }
 
-output "mlflow_artifacts_bucket_name" {
-  description = "Name of the MLflow artifacts S3 bucket"
-  value       = aws_s3_bucket.mlflow_artifacts.id
+output "data_bucket_name" {
+  description = "Name of the smart-logistics-data S3 bucket"
+  value       = aws_s3_bucket.smart_logistics_data.id
+}
+
+output "data_bucket_arn" {
+  description = "ARN of the smart-logistics-data S3 bucket"
+  value       = aws_s3_bucket.smart_logistics_data.arn
+}
+
+output "model_registry_bucket_name" {
+  description = "Name of the MLflow model registry S3 bucket"
+  value       = aws_s3_bucket.mlflow_model_registry.id
+}
+
+output "model_registry_bucket_arn" {
+  description = "ARN of the MLflow model registry S3 bucket"
+  value       = aws_s3_bucket.mlflow_model_registry.arn
 }
 
 output "mlflow_s3_role_arn" {

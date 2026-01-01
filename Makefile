@@ -17,13 +17,15 @@
 # ============================================
 
 .PHONY: help setup clean quality check-style fix-style type-check test \
-        infra-up infra-down infra-init infra-status infra-logs
+        infra-up infra-down infra-init infra-status infra-logs s3-sync reset-infra
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
 POETRY := $(shell command -v poetry 2>/dev/null || echo "$$HOME/.local/bin/poetry")
 COMPOSE := docker compose --env-file .env -f deployment/docker/docker-compose.yaml
-TF := cd infrastructure/terraform && tflocal
+TF := cd infrastructure/terraform && $(POETRY) run tflocal
+# LocalStack AWS CLI - uses awslocal via Poetry
+AWS_LOCAL := $(POETRY) run awslocal
 
 # --- Colors ---
 CYAN := \033[36m
@@ -39,13 +41,13 @@ help: ## Show this help message
 	@echo "$(BOLD)$(CYAN)Smart Logistics MLOps$(RESET) - Available Commands:"
 	@echo ""
 	@echo "$(YELLOW)Setup & Environment:$(RESET)"
-	@grep -E '^(setup|clean):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(setup|clean|reset-infra):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Quality & Testing:$(RESET)"
 	@grep -E '^(quality|check-style|fix-style|type-check|test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Infrastructure:$(RESET)"
-	@grep -E '^(infra-up|infra-down|infra-init|infra-status|infra-logs):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(infra-up|infra-down|infra-init|infra-status|infra-logs|s3-sync):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(BOLD)Quick Start:$(RESET) make setup && make quality"
 	@echo ""
@@ -129,46 +131,87 @@ quality: check-style type-check test ## Run all quality checks (CI entry point)
 	@echo "$(GREEN)$(BOLD)✓ All quality checks passed!$(RESET)"
 
 # --- 🧹 Cleaning ---
-clean: ## Deep clean of data and caches
-	@echo "$(CYAN)🧹 Cleaning project...$(RESET)"
-	$(COMPOSE) down -v 2>/dev/null || true
-	rm -rf deployment/docker/.localstack
-	rm -rf infrastructure/terraform/.terraform
-	rm -f infrastructure/terraform/terraform.tfstate*
-	rm -f infrastructure/terraform/tfplan
+# --- 🧹 Cleaning ---
+clean: ## Clean Python caches (preserves all infrastructure state)
+	@echo "$(CYAN)🧹 Cleaning Python caches...$(RESET)"
+	$(COMPOSE) down 2>/dev/null || true
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .coverage htmlcov/ dist/ build/ *.egg-info/
-	@echo "$(GREEN)✓ Cleaned: Docker, LocalStack, Terraform, Python caches$(RESET)"
+	@echo "$(GREEN)✓ Cleaned: Python caches$(RESET)"
+	@echo "$(YELLOW)ℹ Preserved: Infrastructure state (Terraform, LocalStack, DB, S3)$(RESET)"
+
+reset-infra: ## ⚠️  Wipe all infrastructure state (Terraform, LocalStack)
+	@echo "$(RED)⚠️  Resetting infrastructure state...$(RESET)"
+	@echo "$(RED)This will delete LocalStack data and Terraform state.$(RESET)"
+	$(COMPOSE) down -v 2>/dev/null || true
+	rm -rf deployment/docker/.localstack
+	rm -rf infrastructure/terraform/.terraform
+	rm -f infrastructure/terraform/terraform.tfstate*
+	rm -f infrastructure/terraform/tfplan
+	@echo "$(GREEN)✓ Reset: Infrastructure state cleared$(RESET)"
+	@echo "$(YELLOW)ℹ Note: Persistent folders (data/, models/, mlflow_db/) were NOT deleted.$(RESET)"
 
 # --- 🏗️ Infrastructure ---
 infra-up: ## Start infrastructure services (LocalStack, Postgres, MLflow)
 	@echo "$(CYAN)🏗️ Starting infrastructure services...$(RESET)"
+	@echo "$(CYAN)  Creating persistent folders if needed...$(RESET)"
+	@mkdir -p data models mlflow_db
 	$(COMPOSE) up -d --wait
 	@echo ""
 	@echo "$(GREEN)✓ Infrastructure ready!$(RESET)"
 	@echo "  • LocalStack:  http://localhost:4566"
 	@echo "  • PostgreSQL:  localhost:5432"
 	@echo "  • MLflow UI:   http://localhost:5001"
+	@echo ""
+	@echo "$(YELLOW)S3 Buckets (synced with local folders):$(RESET)"
+	@echo "  • s3://smart-logistics-data   ↔ ./data"
+	@echo "  • s3://mlflow-model-registry  ↔ ./models"
+	@echo ""
+	@echo "$(YELLOW)Persistent storage:$(RESET)"
+	@echo "  • PostgreSQL data            → ./mlflow_db"
 
-infra-down: ## Stop all infrastructure services
+infra-down: ## Stop all infrastructure services (syncs S3 to local first)
+	@echo "$(CYAN)🔄 Syncing S3 buckets to local folders...$(RESET)"
+	@$(AWS_LOCAL) s3 sync s3://smart-logistics-data ./data \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@$(AWS_LOCAL) s3 sync s3://mlflow-model-registry ./models \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
 	@echo "$(CYAN)🛑 Stopping infrastructure services...$(RESET)"
 	$(COMPOSE) down
 	@echo "$(GREEN)✓ Infrastructure stopped$(RESET)"
+	@echo "$(YELLOW)ℹ Persistent data preserved in: data/, models/, mlflow_db/$(RESET)"
 
 infra-logs: ## Show logs from infrastructure services
 	$(COMPOSE) logs -f
 
-infra-init: ## Apply Terraform resources (S3 buckets, IAM roles)
+infra-init: ## Apply Terraform resources (S3 buckets, IAM roles, sync local→S3)
 	@echo "$(CYAN)🏗️ Initializing infrastructure resources...$(RESET)"
+	@echo "$(CYAN)  Using tflocal for LocalStack...$(RESET)"
 	$(TF) init -input=false
 	$(TF) apply -auto-approve
 	@echo "$(GREEN)✓ Infrastructure initialized!$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)S3 Buckets created (LocalStack):$(RESET)"
+	@$(AWS_LOCAL) s3 ls 2>/dev/null || true
 
 infra-status: ## Show status of Terraform resources
 	@echo "$(CYAN)📊 Checking infrastructure status...$(RESET)"
 	$(TF) validate
 	$(TF) plan -out=tfplan
 	@echo "$(GREEN)✓ Infrastructure validation complete$(RESET)"
+
+s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
+	@echo "$(CYAN)🔄 Syncing local folders to S3 (LocalStack)...$(RESET)"
+	@$(AWS_LOCAL) s3 sync ./data s3://smart-logistics-data \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@$(AWS_LOCAL) s3 sync ./models s3://mlflow-model-registry \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@echo "$(CYAN)🔄 Syncing S3 to local folders...$(RESET)"
+	@$(AWS_LOCAL) s3 sync s3://smart-logistics-data ./data \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@$(AWS_LOCAL) s3 sync s3://mlflow-model-registry ./models \
+		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@echo "$(GREEN)✓ Sync complete$(RESET)"

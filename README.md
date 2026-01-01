@@ -69,7 +69,9 @@ python src/your_script.py
 | `make infra-down` | Stop all Docker services |
 | `make infra-init` | Create S3 buckets and IAM roles via Terraform |
 | `make infra-logs` | Show logs from infrastructure services |
-| `make clean` | Remove containers, caches, and LocalStack data |
+| `make s3-sync` | Manual bidirectional sync (Local ↔ S3) |
+| `make clean` | Clean Python caches (Safe: keeps infra state) |
+| `make reset-infra` | **Destructive**: Delete all LocalStack & Terraform state |
 
 ## 🌐 Service URLs (after `make infra-up`)
 
@@ -78,6 +80,26 @@ python src/your_script.py
 | LocalStack | http://localhost:4566 | AWS emulation (S3, IAM) |
 | PostgreSQL | localhost:5432 | MLflow backend store |
 | MLflow UI | http://localhost:5001 | Experiment tracking |
+
+## 💾 Persistent Storage (S3 Buckets & Local Folders)
+
+The infrastructure uses LocalStack to simulate AWS S3 buckets. Data is synced bidirectionally with local folders, ensuring persistence across container restarts.
+
+| S3 Bucket | Local Folder | Purpose |
+|-----------|--------------|----------|
+| `s3://smart-logistics-data` | `./data/` | Raw & processed datasets |
+| `s3://mlflow-model-registry` | `./models/` | MLflow model artifacts |
+
+| Local Folder | Purpose |
+|--------------|---------|
+| `./mlflow_db/` | PostgreSQL data (MLflow experiments) |
+
+**How it works:**
+- On `make infra-up`: Starts Docker services (LocalStack, PostgreSQL, MLflow)
+- On `make infra-init`: **Terraform creates S3 buckets** and syncs local folders **to** S3
+- On `make s3-sync`: Manual bidirectional sync between local folders and S3
+- On `make infra-down`: Final sync from S3 **to** local before shutdown
+- After shutdown: `data/`, `models/`, `mlflow_db/` persist on disk
 
 ## 📁 Project Structure
 
@@ -90,7 +112,9 @@ Smart-Logistics-Supply-Chain-ML/
 │   ├── model_training/     # Training pipelines
 │   ├── model_evaluation/   # Metrics & validation
 │   └── utils/              # Shared utilities
-├── data/                   # Data directory (DVC managed)
+├── data/                   # 📦 Synced with s3://smart-logistics-data
+├── models/                 # 📦 Synced with s3://mlflow-model-registry
+├── mlflow_db/              # 📦 PostgreSQL data persistence
 ├── deployment/docker/      # Docker Compose (infrastructure only)
 ├── infrastructure/terraform/ # IaC for LocalStack
 ├── tests/                  # Pytest test suite
@@ -130,7 +154,7 @@ make clean         # Full cleanup
 
 ## 🔧 Environment Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (see `.env.example`):
 
 ```bash
 # AWS/LocalStack
@@ -142,6 +166,10 @@ AWS_DEFAULT_REGION=us-east-1
 # LocalStack Pro (optional)
 LOCALSTACK_TOKEN=your-token-here
 
+# S3 Bucket Names
+S3_DATA_BUCKET=smart-logistics-data
+S3_MODEL_REGISTRY_BUCKET=mlflow-model-registry
+
 # PostgreSQL
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
@@ -151,6 +179,8 @@ POSTGRES_DB=mlflow
 
 # MLflow
 MLFLOW_TRACKING_URI=http://localhost:5001
+MLFLOW_S3_ENDPOINT_URL=http://localhost:4566
+MLFLOW_ARTIFACT_ROOT=s3://mlflow-model-registry
 ```
 
 ## 🏗️ MLOps Stack
