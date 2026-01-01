@@ -1,7 +1,8 @@
 # ============================================
 # MLOps CI Pipeline
 # ============================================
-# Bare-metal development: Python runs locally, Docker for infrastructure only
+# Single Source of Truth: All commands flow through the Makefile
+# Environment: Poetry (pip-based, reproducible)
 # ============================================
 
 name: MLOps CI
@@ -47,73 +48,13 @@ jobs:
           key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: make install
 
-      - name: Run linting
-        run: poetry run ruff check .
-
-      - name: Check formatting
-        run: poetry run ruff format --check .
+      - name: Check code style
+        run: make check-style
 
       - name: Run type checking
-        run: poetry run mypy src/
-        continue-on-error: true
+        run: make type-check
 
       - name: Run tests
-        run: poetry run pytest tests/ -v --tb=short
-
-  # ============================================
-  # Job 2: Infrastructure Validation
-  # ============================================
-  infra-validation:
-    name: Infra Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install tflocal
-        run: pip install terraform-local
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.0
-
-      - name: Start LocalStack
-        uses: localstack/localstack-github-action@main
-        with:
-          image-tag: "latest"
-          install-awslocal: "true"
-
-      - name: Wait for LocalStack
-        run: |
-          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "running\|available"; do sleep 2; done'
-          echo "LocalStack ready!"
-
-      - name: Terraform Init & Validate
-        run: |
-          cd infrastructure/terraform
-          tflocal init -input=false
-          tflocal validate
-          tflocal plan -out=tfplan
-        continue-on-error: true
-
-  # ============================================
-  # Job 3: Pre-commit Hooks
-  # ============================================
-  pre-commit:
-    name: Pre-commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - uses: pre-commit/action@v3.0.1
+        run: make test
