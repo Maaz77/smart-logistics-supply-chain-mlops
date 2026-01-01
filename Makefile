@@ -22,7 +22,7 @@
 # --- Configuration ---
 PYTHON_VERSION := 3.12
 POETRY := $(shell command -v poetry 2>/dev/null || echo "$$HOME/.local/bin/poetry")
-COMPOSE := docker compose --env-file .env -f deployment/docker/docker-compose.yaml
+COMPOSE := docker compose -f deployment/docker/docker-compose.yaml
 TF := cd infrastructure/terraform && $(POETRY) run tflocal
 # LocalStack AWS CLI - uses awslocal via Poetry
 AWS_LOCAL := $(POETRY) run awslocal
