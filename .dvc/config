@@ -1,3 +1,7 @@
 [core]
-    # Disables DVC's integration with Git or other SCM systems.
-    no_scm = True
+    autostage = true
+    remote = localstack
+
+['remote "localstack"']
+    url = s3://smart-logistics-data/dvc
+    endpointurl = http://localhost:4566

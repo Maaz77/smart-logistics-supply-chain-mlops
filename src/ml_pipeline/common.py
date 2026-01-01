@@ -5,6 +5,7 @@ This module provides shared utilities used across the project including:
 - Configuration file handling
 - Directory management
 - Service endpoint resolution (bare-metal mode: always localhost)
+- S3 bucket configuration
 """
 
 import logging
@@ -12,6 +13,10 @@ import os
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -122,6 +127,33 @@ def get_s3_client():
 
 
 # ============================================
+# S3 Bucket Configuration
+# ============================================
+
+
+def get_data_bucket() -> str:
+    """Returns the S3 bucket name for data storage.
+
+    Reads from S3_DATA_BUCKET environment variable.
+
+    Returns:
+        S3 bucket name for data (raw and processed).
+    """
+    return os.getenv("S3_DATA_BUCKET", "smart-logistics-data")
+
+
+def get_model_registry_bucket() -> str:
+    """Returns the S3 bucket name for MLflow model registry.
+
+    Reads from S3_MODEL_REGISTRY_BUCKET environment variable.
+
+    Returns:
+        S3 bucket name for MLflow artifacts.
+    """
+    return os.getenv("S3_MODEL_REGISTRY_BUCKET", "mlflow-model-registry")
+
+
+# ============================================
 # Module self-test
 # ============================================
 if __name__ == "__main__":
@@ -131,5 +163,7 @@ if __name__ == "__main__":
     print(f"LocalStack endpoint: {get_localstack_endpoint()}")
     print(f"MLflow tracking URI: {get_mlflow_tracking_uri()}")
     print(f"PostgreSQL connection: {get_postgres_connection_string()}")
+    print(f"Data bucket: {get_data_bucket()}")
+    print(f"Model registry bucket: {get_model_registry_bucket()}")
     print("=" * 50)
     print("✓ All utilities loaded successfully!")

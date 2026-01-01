@@ -47,10 +47,12 @@ logs/
 # Data folder (synced with S3 smart-logistics-data bucket)
 /data/*
 !/data/.gitkeep
+!/data/**/*.dvc
 
 # Models folder (synced with S3 mlflow-model-registry bucket)
 /models/*
 !/models/.gitkeep
+!/models/**/*.dvc
 
 # MLflow PostgreSQL data persistence
 /mlflow_db/*

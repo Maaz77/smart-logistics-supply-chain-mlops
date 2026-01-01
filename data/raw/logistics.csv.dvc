@@ -1,0 +1,5 @@
+outs:
+- md5: 51898b8b6e13b0d6074a8c251ca18dbe
+  size: 106483
+  hash: md5
+  path: logistics.csv

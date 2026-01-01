@@ -1,9 +1,9 @@
-"""Tests for src/utils/common.py utility functions."""
+"""Tests for src/ml_pipeline/common.py utility functions."""
 
 import os
 from unittest.mock import patch
 
-from src.utils.common import (
+from src.ml_pipeline.common import (
     create_directories,
     get_localstack_endpoint,
     get_mlflow_tracking_uri,

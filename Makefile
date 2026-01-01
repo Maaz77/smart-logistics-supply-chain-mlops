@@ -17,7 +17,8 @@
 # ============================================
 
 .PHONY: help setup clean quality check-style fix-style type-check test \
-        infra-up infra-down infra-init infra-status infra-logs s3-sync reset-infra
+        infra-up infra-down infra-init infra-status infra-logs s3-sync reset-infra \
+        pipeline
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
@@ -48,6 +49,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "$(YELLOW)Infrastructure:$(RESET)"
 	@grep -E '^(infra-up|infra-down|infra-init|infra-status|infra-logs|s3-sync):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)ML Pipeline:$(RESET)"
+	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(BOLD)Quick Start:$(RESET) make setup && make quality"
 	@echo ""
@@ -215,3 +219,25 @@ s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
 	@$(AWS_LOCAL) s3 sync s3://mlflow-model-registry ./models \
 		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
 	@echo "$(GREEN)✓ Sync complete$(RESET)"
+
+# --- 🚀 ML Pipeline ---
+pipeline: ## Run the full ML pipeline (ingest → preprocess → train)
+	@echo "$(BOLD)$(CYAN)🚀 Running ML Pipeline$(RESET)"
+	@echo ""
+	@echo "$(CYAN)Step 1/3: Data Ingestion$(RESET)"
+	@$(POETRY) run python -m src.ml_pipeline.ingest
+	@echo ""
+	@echo "$(CYAN)Step 2/3: Feature Engineering$(RESET)"
+	@$(POETRY) run python -m src.ml_pipeline.preprocess
+	@echo ""
+	@echo "$(CYAN)Step 3/3: Model Training$(RESET)"
+	@$(POETRY) run python -m src.ml_pipeline.train
+	@echo ""
+	@echo "$(GREEN)$(BOLD)════════════════════════════════════════$(RESET)"
+	@echo "$(GREEN)$(BOLD)✓ Pipeline complete!$(RESET)"
+	@echo "$(GREEN)$(BOLD)════════════════════════════════════════$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)View results:$(RESET)"
+	@echo "  • MLflow UI:   $(CYAN)http://localhost:5001$(RESET)"
+	@echo "  • S3 data:     $(CYAN)poetry run awslocal s3 ls s3://smart-logistics-data/ --recursive$(RESET)"
+	@echo ""

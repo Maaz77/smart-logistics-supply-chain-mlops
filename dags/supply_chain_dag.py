@@ -1,3 +1,9 @@
+"""
+Airflow DAG for Smart Logistics Supply Chain ML Pipeline.
+
+Orchestrates: Data Ingestion -> Preprocessing -> Model Training
+"""
+
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -9,7 +15,7 @@ default_args = {
     "start_date": datetime(2023, 1, 1),
     "email_on_failure": False,
     "email_on_retry": False,
-    "retries": 1,
+    "retries": 2,
     "retry_delay": timedelta(minutes=5),
 }
 
@@ -19,27 +25,35 @@ dag = DAG(
     description="Smart Logistics Supply Chain ML Pipeline",
     schedule_interval=timedelta(days=1),
     catchup=False,
+    tags=["ml", "logistics", "pipeline"],
 )
 
 
 def ingest_data():
-    print("Ingesting data...")
+    """Run data ingestion from Kaggle to S3."""
+    from src.ml_pipeline import run_ingestion
+
+    result = run_ingestion()
+    print(f"Ingestion result: {result}")
+    return result
 
 
-def validate_data():
-    print("Validating data...")
+def preprocess_data():
+    """Run feature engineering and data splitting."""
+    from src.ml_pipeline import run_preprocessing
 
-
-def engineer_features():
-    print("Engineering features...")
+    result = run_preprocessing()
+    print(f"Preprocessing result: {result}")
+    return result
 
 
 def train_model():
-    print("Training model...")
+    """Train model using sklearn and register with MLflow."""
+    from src.ml_pipeline import run_training
 
-
-def evaluate_model():
-    print("Evaluating model...")
+    result = run_training()
+    print(f"Training result: {result}")
+    return result
 
 
 ingest_task = PythonOperator(
@@ -48,15 +62,9 @@ ingest_task = PythonOperator(
     dag=dag,
 )
 
-validate_task = PythonOperator(
-    task_id="validate_data",
-    python_callable=validate_data,
-    dag=dag,
-)
-
-feature_task = PythonOperator(
-    task_id="engineer_features",
-    python_callable=engineer_features,
+preprocess_task = PythonOperator(
+    task_id="preprocess_data",
+    python_callable=preprocess_data,
     dag=dag,
 )
 
@@ -66,10 +74,5 @@ train_task = PythonOperator(
     dag=dag,
 )
 
-eval_task = PythonOperator(
-    task_id="evaluate_model",
-    python_callable=evaluate_model,
-    dag=dag,
-)
-
-ingest_task >> validate_task >> feature_task >> train_task >> eval_task
+# Define task dependencies
+ingest_task >> preprocess_task >> train_task
