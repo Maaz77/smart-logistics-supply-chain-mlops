@@ -1,14 +1,14 @@
-# Base docker-compose configuration with LocalStack
-
-# Base docker-compose configuration with LocalStack
-# This file defines the core network and LocalStack service for local AWS emulation
-
-networks:
-  mlops-network:
-    driver: bridge
-    name: mlops-network
+# ============================================
+# Docker Compose - MLOps Infrastructure Services
+# ============================================
+# All infrastructure services for local ML development
+# Usage: docker compose -f deployment/docker/docker-compose.yaml up -d
+# ============================================
 
 services:
+  # ============================================
+  # LocalStack - AWS Cloud Emulator
+  # ============================================
   localstack:
     image: localstack/localstack:3.0
     container_name: localstack
@@ -17,20 +17,82 @@ services:
       - "4510-4559:4510-4559" # External services port range
     environment:
       - SERVICES=s3,iam,sts,rds
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-${LOCALSTACK_TOKEN:-}}
       - DEBUG=${DEBUG:-0}
       - PERSISTENCE=1
-      - LOCALSTACK_HOST=localstack
+      - LOCALSTACK_HOST=localhost
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
     volumes:
       - "./.localstack:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
-    networks:
-      - mlops-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # ============================================
+  # PostgreSQL - MLflow Backend Store
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: mlflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlflow} -d ${POSTGRES_DB:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
+  # MLflow Tracking Server
+  # ============================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: mlflow-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    ports:
+      - "5001:5000"  # External 5001 -> Internal 5000 (avoids macOS AirPlay conflict)
+    environment:
+      # MLflow backend store configuration (Postgres)
+      MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      # MLflow artifact store configuration (S3 via LocalStack)
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://ml-artifacts
+      # S3 endpoint for LocalStack (container-to-container communication)
+      MLFLOW_S3_ENDPOINT_URL: http://localstack:4566
+      # AWS credentials for LocalStack
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    command: >
+      bash -c "pip install psycopg2-binary boto3 --quiet &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      --default-artifact-root s3://ml-artifacts"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s  # Give time for pip install + migrations
+
+volumes:
+  postgres_data:
+    driver: local

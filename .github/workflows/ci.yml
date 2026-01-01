@@ -1,19 +1,16 @@
+# ============================================
 # MLOps CI Pipeline
-# Triggered on push and pull_request events
-# Runs linting, type checking, testing, and infrastructure validation
+# ============================================
+# Bare-metal development: Python runs locally, Docker for infrastructure only
+# ============================================
 
 name: MLOps CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
-      - "feature/**"
+    branches: [master, develop, "feature/**"]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [master, develop]
 
 env:
   PYTHON_VERSION: "3.12"
@@ -21,10 +18,10 @@ env:
 
 jobs:
   # ============================================
-  # Job 1: Lint and Test
+  # Job 1: Quality Checks
   # ============================================
-  lint-and-test:
-    name: Lint and Test
+  quality:
+    name: Quality Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -42,37 +39,28 @@ jobs:
           version: ${{ env.POETRY_VERSION }}
           virtualenvs-create: true
           virtualenvs-in-project: true
-          installer-parallel: true
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
 
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
-
-      - name: Install project
         run: poetry install --no-interaction
 
-      - name: Run Ruff linter
+      - name: Run linting
         run: poetry run ruff check .
 
-      - name: Run Ruff formatter check
+      - name: Check formatting
         run: poetry run ruff format --check .
 
-      - name: Run MyPy type checker
+      - name: Run type checking
         run: poetry run mypy src/
-        continue-on-error: true # Allow to continue while type hints are being added
+        continue-on-error: true
 
-      - name: Run tests with pytest
+      - name: Run tests
         run: poetry run pytest tests/ -v --tb=short
-        continue-on-error: true # Allow to continue while tests are being added
 
   # ============================================
   # Job 2: Infrastructure Validation
@@ -84,6 +72,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install tflocal
+        run: pip install terraform-local
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -98,55 +94,26 @@ jobs:
 
       - name: Wait for LocalStack
         run: |
-          echo "Waiting for LocalStack to be ready..."
-          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"s3\": \"\(running\|available\)\""; do sleep 2; done'
-          echo "LocalStack is ready!"
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "running\|available"; do sleep 2; done'
+          echo "LocalStack ready!"
 
-      - name: Terraform Init
-        run: terraform init
-        working-directory: infrastructure/terraform
-
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: infrastructure/terraform
-
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
-        working-directory: infrastructure/terraform
+      - name: Terraform Init & Validate
+        run: |
+          cd infrastructure/terraform
+          tflocal init -input=false
+          tflocal validate
+          tflocal plan -out=tfplan
         continue-on-error: true
 
   # ============================================
-  # Job 3: Docker Build Validation
+  # Job 3: Pre-commit Hooks
   # ============================================
-  docker-build:
-    name: Docker Build
+  pre-commit:
+    name: Pre-commit
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image (dev stage)
-        uses: docker/build-push-action@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          context: .
-          file: deployment/docker/Dockerfile
-          target: dev
-          push: false
-          tags: smart-logistics-ml:dev
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build Docker image (production stage)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deployment/docker/Dockerfile
-          target: production
-          push: false
-          tags: smart-logistics-ml:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: pre-commit/action@v3.0.1

@@ -68,8 +68,8 @@ deployment/docker/.localstack/
 infrastructure/terraform/.terraform/
 infrastructure/terraform/*.tfstate
 infrastructure/terraform/*.tfstate.*
-infrastructure/terraform/.terraform.lock.hcl
 infrastructure/terraform/tfplan
+
 
 # Additional caches
 .mypy_cache/
