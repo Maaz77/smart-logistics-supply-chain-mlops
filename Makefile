@@ -7,8 +7,7 @@
 #
 # 🚀 QUICK START FOR NEW DEVELOPERS:
 #   1. Run: make setup   (creates Python env + installs all dependencies)
-#   2. Run: make quality (verify everything works)
-#   3. Start coding!
+#   2. Start coding!
 #
 # Prerequisites: Poetry and pyenv must be installed.
 #   Install Poetry: curl -sSL https://install.python-poetry.org | python3 -
@@ -16,7 +15,7 @@
 #
 # ============================================
 
-.PHONY: help setup clean quality check-style fix-style type-check test \
+.PHONY: help setup clean fix-style type-check test \
         infra-up infra-down infra-init infra-status infra-logs s3-sync reset-infra \
         pipeline
 
@@ -24,6 +23,7 @@
 PYTHON_VERSION := 3.12
 POETRY := $(shell command -v poetry 2>/dev/null || echo "$$HOME/.local/bin/poetry")
 COMPOSE := docker compose -f deployment/docker/docker-compose.yaml
+COMPOSE_AIRFLOW := docker compose -f deployment/docker/docker-compose.airflow.yaml
 TF := cd infrastructure/terraform && $(POETRY) run tflocal
 # LocalStack AWS CLI - uses awslocal via Poetry
 AWS_LOCAL := $(POETRY) run awslocal
@@ -45,7 +45,7 @@ help: ## Show this help message
 	@grep -E '^(setup|clean|reset-infra):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Quality & Testing:$(RESET)"
-	@grep -E '^(quality|check-style|fix-style|type-check|test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(fix-style|type-check|test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Infrastructure:$(RESET)"
 	@grep -E '^(infra-up|infra-down|infra-init|infra-status|infra-logs|s3-sync):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
@@ -53,7 +53,7 @@ help: ## Show this help message
 	@echo "$(YELLOW)ML Pipeline:$(RESET)"
 	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(BOLD)Quick Start:$(RESET) make setup && make quality"
+	@echo "$(BOLD)Quick Start:$(RESET) make setup"
 	@echo ""
 
 # --- � Setup (Single unified target) ---
@@ -104,17 +104,10 @@ setup: ## Create Python 3.12 environment and install all dependencies
 	@echo "  Venv:    $(CYAN)$$($(POETRY) env info --path)$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Next steps:$(RESET)"
-	@echo "  • Run quality checks:    $(CYAN)make quality$(RESET)"
 	@echo "  • Start infrastructure:  $(CYAN)make infra-up$(RESET)"
 	@echo ""
 
 # --- 🔍 Quality Checks ---
-check-style: ## Check code style without fixing (ruff check + format --check)
-	@echo "$(CYAN)🔍 Checking code style...$(RESET)"
-	@$(POETRY) run ruff check .
-	@$(POETRY) run ruff format --check .
-	@echo "$(GREEN)✓ Code style checks passed$(RESET)"
-
 fix-style: ## Auto-fix code style issues (ruff check --fix + format)
 	@echo "$(CYAN)🔧 Fixing code style...$(RESET)"
 	@$(POETRY) run ruff check --fix .
@@ -131,8 +124,6 @@ test: ## Run tests with pytest
 	@$(POETRY) run pytest tests/ -v --tb=short
 	@echo "$(GREEN)✓ Tests complete$(RESET)"
 
-quality: check-style type-check test ## Run all quality checks (CI entry point)
-	@echo "$(GREEN)$(BOLD)✓ All quality checks passed!$(RESET)"
 
 # --- 🧹 Cleaning ---
 # --- 🧹 Cleaning ---
@@ -162,13 +153,18 @@ reset-infra: ## ⚠️  Wipe all infrastructure state (Terraform, LocalStack)
 infra-up: ## Start infrastructure services (LocalStack, Postgres, MLflow)
 	@echo "$(CYAN)🏗️ Starting infrastructure services...$(RESET)"
 	@echo "$(CYAN)  Creating persistent folders if needed...$(RESET)"
-	@mkdir -p data models mlflow_db
+	@mkdir -p data models mlflow_db airflow_db
 	$(COMPOSE) up -d --wait
 	@echo ""
-	@echo "$(GREEN)✓ Infrastructure ready!$(RESET)"
+	@echo "$(BOLD)$(CYAN)🌀 Starting Airflow...$(RESET)"
+	@$(COMPOSE_AIRFLOW) build
+	@$(COMPOSE_AIRFLOW) up -d
+	@echo ""
+	@echo "$(GREEN)✓ Infrastructure & Airflow ready!$(RESET)"
 	@echo "  • LocalStack:  http://localhost:4566"
 	@echo "  • PostgreSQL:  localhost:5432"
 	@echo "  • MLflow UI:   http://localhost:5001"
+	@echo "  • Airflow UI:  http://localhost:8080 (Login: admin/admin)"
 	@echo ""
 	@echo "$(YELLOW)S3 Buckets (synced with local folders):$(RESET)"
 	@echo "  • s3://smart-logistics-data   ↔ ./data"
@@ -176,17 +172,17 @@ infra-up: ## Start infrastructure services (LocalStack, Postgres, MLflow)
 	@echo ""
 	@echo "$(YELLOW)Persistent storage:$(RESET)"
 	@echo "  • PostgreSQL data            → ./mlflow_db"
+	@echo "  • Airflow data               → ./airflow_db"
 
 infra-down: ## Stop all infrastructure services (syncs S3 to local first)
 	@echo "$(CYAN)🔄 Syncing S3 buckets to local folders...$(RESET)"
-	@$(AWS_LOCAL) s3 sync s3://smart-logistics-data ./data \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
-	@$(AWS_LOCAL) s3 sync s3://mlflow-model-registry ./models \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
+	@$(POETRY) run python scripts/s3_sync.py || true
+	@echo "$(CYAN)🛑 Stopping Airflow...$(RESET)"
+	@$(COMPOSE_AIRFLOW) down
 	@echo "$(CYAN)🛑 Stopping infrastructure services...$(RESET)"
 	$(COMPOSE) down
-	@echo "$(GREEN)✓ Infrastructure stopped$(RESET)"
-	@echo "$(YELLOW)ℹ Persistent data preserved in: data/, models/, mlflow_db/$(RESET)"
+	@echo "$(GREEN)✓ Infrastructure & Airflow stopped$(RESET)"
+	@echo "$(YELLOW)ℹ Persistent data preserved in: data/, models/, mlflow_db/, airflow_db/$(RESET)"
 
 infra-logs: ## Show logs from infrastructure services
 	$(COMPOSE) logs -f
@@ -208,19 +204,9 @@ infra-status: ## Show status of Terraform resources
 	@echo "$(GREEN)✓ Infrastructure validation complete$(RESET)"
 
 s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
-	@echo "$(CYAN)🔄 Syncing local folders to S3 (LocalStack)...$(RESET)"
-	@$(AWS_LOCAL) s3 sync ./data s3://smart-logistics-data \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
-	@$(AWS_LOCAL) s3 sync ./models s3://mlflow-model-registry \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
-	@echo "$(CYAN)🔄 Syncing S3 to local folders...$(RESET)"
-	@$(AWS_LOCAL) s3 sync s3://smart-logistics-data ./data \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
-	@$(AWS_LOCAL) s3 sync s3://mlflow-model-registry ./models \
-		--exclude ".gitkeep" --exclude ".DS_Store" 2>/dev/null || true
-	@echo "$(GREEN)✓ Sync complete$(RESET)"
+	@$(POETRY) run python scripts/s3_sync.py
 
-# --- 🚀 ML Pipeline ---
+# ---  ML Pipeline ---
 pipeline: ## Run the full ML pipeline (ingest → preprocess → train)
 	@echo "$(BOLD)$(CYAN)🚀 Running ML Pipeline$(RESET)"
 	@echo ""

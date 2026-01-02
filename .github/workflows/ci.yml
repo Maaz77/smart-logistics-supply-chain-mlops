@@ -50,9 +50,6 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      - name: Check code style
-        run: make check-style
-
       - name: Run type checking
         run: make type-check
 

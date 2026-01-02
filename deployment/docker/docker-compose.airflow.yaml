@@ -1,0 +1,164 @@
+# ============================================
+# Docker Compose - Airflow Orchestration Services
+# ============================================
+# Separate compose file for Airflow services
+# Joins the existing mlops_network from the main docker-compose.yaml
+#
+# Usage:
+#   make airflow-up   (starts Airflow)
+#   make airflow-down (stops Airflow)
+#
+# Prerequisites:
+#   - Main infra must be running: make infra-up
+# ============================================
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile_inline: |
+      FROM apache/airflow:2.7.1-python3.10
+      USER root
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+          gcc python3-dev \
+          && apt-get clean && rm -rf /var/lib/apt/lists/*
+      USER airflow
+      COPY requirements-airflow.txt /tmp/requirements-airflow.txt
+      RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt
+      ENV PYTHONPATH=/opt/airflow
+  environment: &airflow-common-env
+    # Airflow Core Config
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
+
+    # Database connection (Airflow's own Postgres)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+
+    # Webserver config
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__WEBSERVER__RBAC: 'true'
+
+    # API config
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+
+    # --- ML Pipeline Environment Variables ---
+    # MLflow (container-to-container communication)
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MLFLOW_S3_ENDPOINT_URL: http://localstack:4566
+
+    # AWS/LocalStack credentials
+    AWS_ENDPOINT_URL: http://localstack:4566
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    AWS_DEFAULT_REGION: us-east-1
+
+    # S3 bucket names
+    S3_DATA_BUCKET: smart-logistics-data
+    S3_MODEL_REGISTRY_BUCKET: mlflow-model-registry
+
+  volumes:
+    - ../../dags:/opt/airflow/dags
+    - ../../src:/opt/airflow/src
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+  networks:
+    - default
+
+services:
+  # ============================================
+  # PostgreSQL - Airflow Metadata Store
+  # ============================================
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ../../airflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+
+  # ============================================
+  # Airflow Init - Database & Admin User Setup
+  # ============================================
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true
+        echo "Airflow initialization complete!"
+    restart: "no"
+
+  # ============================================
+  # Airflow Webserver - UI on port 8080
+  # ============================================
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ============================================
+  # Airflow Scheduler - Task Execution
+  # ============================================
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  airflow-logs:
+
+# ============================================
+# Networks - Join existing mlops_network
+# ============================================
+networks:
+  default:
+    external: true
+    name: mlops_network

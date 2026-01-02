@@ -58,6 +58,9 @@ logs/
 /mlflow_db/*
 !/mlflow_db/.gitkeep
 
+# Airflow PostgreSQL data persistence
+/airflow_db/*
+
 # IDEs
 .vscode/
 .idea/

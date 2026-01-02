@@ -1,46 +1,39 @@
-### CODING_AGENT_PROMPT: Airflow Containerization and Orchestration
+# Minimal-Touch Airflow Integration
 
 **Context:**
-We need to move the ML pipeline from a manual `make pipeline` command to a fully containerized Airflow orchestration. The environment must be able to interact with LocalStack (S3) and the existing MLflow service.
+We have a working MLOps infra (LocalStack, MLflow, Postgres). I need to add Airflow for orchestration WITHOUT modifying the current service configurations. This must be a "plug-and-play" addition.
 
 **Requirements:**
 
-1. **Docker Integration:**
+1. **New Airflow Container Setup:**
    - Create `deployment/docker/Dockerfile.airflow` based on `apache/airflow:2.7.1-python3.10`.
-   - The Dockerfile must:
-     - Install `gcc` and `python3-dev` (required for some ML libs).
-     - Copy `pyproject.toml` and `poetry.lock` (if exists) or `requirements.txt`.
-     - Install project dependencies into the airflow user space.
-     - Set `PYTHONPATH=/opt/airflow` to ensure `src` is importable.
+   - Install ONLY the necessary libs to run the ml pipeline:
+   - Set `PYTHONPATH=/opt/airflow`.
 
-2. **Docker Compose Update:**
-   - Add the following services to the main `docker-compose.yaml`:
-     - `airflow-db`: Postgres 13 image for Airflow metadata.
-     - `airflow-init`: A one-off service to run `airflow db init`.
-     - `airflow-webserver`: Expose on port `8080`.
-     - `airflow-scheduler`: Responsible for triggering the DAG.
-   - **Volumes:** Mount `./dags:/opt/airflow/dags`, `./src:/opt/airflow/src`, and `./data:/opt/airflow/data`.
-   - **Network:** Ensure all airflow services share the same network as `localstack` and `mlflow`.
+2. **Isolated Compose File (`docker-compose.airflow.yaml`):**
+   - Define a minimal Airflow setup: `airflow-webserver`, `airflow-scheduler`, and `airflow-db` (Postgres).
+   - **Crucial:** Use the `networks` section to join the **existing** network from the main `docker-compose.yaml`.
+   - Define the existing network as `external`. Example:
+     ```yaml
+     networks:
+       default:
+         external: true
+         name: <YOUR_EXISTING_NETWORK_NAME>
+     ```
+   - **Volumes:** Mount `./dags` to `/opt/airflow/dags` and `./src` to `/opt/airflow/src`.
 
-3. **Airflow Configuration:**
-   - Use environment variables in `docker-compose` to configure:
-     - `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`
-     - `AWS_ENDPOINT_URL=http://localstack:4566`
+3. **Zero-Touch Config:**
+   - Do NOT modify the existing `docker-compose.yaml` or `mlflow` settings.
+   - Use environment variables in the new Airflow compose to point to the existing services:
+     - `AIRFLOW__CORE__SQL_ALCHEMY_CONN` (pointing to the new airflow-db)
      - `MLFLOW_TRACKING_URI=http://mlflow:5000`
-     - `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_DEFAULT_REGION=us-east-1`
+     - `AWS_ENDPOINT_URL=http://localstack:4566`
 
-4. **DAG Refinement (`dags/supply_chain_dag.py`):**
-   - Ensure the `PythonOperator` tasks correctly call the functions in:
-     - `src.ml_pipeline.ingest.main`
-     - `src.ml_pipeline.preprocess.main`
-     - `src.ml_pipeline.train.main`
-
-5. **Makefile Update:**
-   - Add a target `make up-airflow` to start these services.
-   - Add a target `make airflow-login` to output the default credentials (admin/admin).
+4. **Makefile Update:**
+   - Add `make airflow-up`: Runs `docker compose -f docker-compose.airflow.yaml up -d`.
+   - Add `make airflow-down`: Runs `docker compose -f docker-compose.airflow.yaml down`.
 
 **Definition of Done:**
-- [ ] `docker-compose up` starts the Airflow UI on `localhost:8080`.
-- [ ] The `supply_chain_pipeline` DAG is visible in the UI.
-- [ ] A manual trigger of the DAG successfully completes all three stages (Ingest, Preprocess, Train).
-- [ ] Logs in the Airflow UI show the model being registered in MLflow.
+- [ ] The existing MLflow and LocalStack services remain running and unaffected.
+- [ ] Airflow starts up and can "see" the `mlflow` container over the network.
+- [ ] The `supply_chain_dag` is parsed correctly and can trigger a test task that imports a function from `src`.

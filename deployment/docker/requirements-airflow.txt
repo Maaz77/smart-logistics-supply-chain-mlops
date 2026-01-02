@@ -1,0 +1,25 @@
+# ============================================
+# Python Dependencies for Airflow ML Pipeline
+# ============================================
+# Minimal set of packages needed to run the ML pipeline inside Airflow
+# ============================================
+
+# Data processing
+pandas>=2.0.0
+pyarrow>=14.0.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+
+# MLflow tracking (pinned to match server version)
+mlflow==2.9.2
+
+# AWS/S3 access (LocalStack)
+boto3>=1.34.0
+
+# Dataset download
+kagglehub>=0.2.0
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0

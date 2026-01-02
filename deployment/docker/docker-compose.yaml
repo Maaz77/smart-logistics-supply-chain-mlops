@@ -43,6 +43,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - mlops_network
 
   # ============================================
   # PostgreSQL - MLflow Backend Store
@@ -65,6 +67,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - mlops_network
 
   # ============================================
   # MLflow Tracking Server
@@ -97,3 +101,13 @@ services:
       --port 5000
       --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
       --default-artifact-root s3://mlflow-model-registry"
+    networks:
+      - mlops_network
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  mlops_network:
+    name: mlops_network
+    driver: bridge

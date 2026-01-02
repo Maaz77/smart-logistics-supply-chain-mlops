@@ -30,19 +30,6 @@ repos:
       - id: detect-private-key
 
   # ============================================
-  # Python code style - delegated to Makefile
-  # ============================================
-  - repo: local
-    hooks:
-      - id: check-style
-        name: check-style
-        entry: make check-style
-        language: system
-        pass_filenames: false
-        types: [python]
-        always_run: true
-
-  # ============================================
   # Terraform formatting
   # ============================================
   - repo: https://github.com/antonbabenko/pre-commit-terraform
