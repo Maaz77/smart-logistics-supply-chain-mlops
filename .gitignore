@@ -55,11 +55,13 @@ logs/
 !/models/**/*.dvc
 
 # MLflow PostgreSQL data persistence
-/mlflow_db/*
-!/mlflow_db/.gitkeep
+mlops_services/mlflow_db/*
 
 # Airflow PostgreSQL data persistence
-/airflow_db/*
+mlops_services/airflow_db/*
+
+# Grafana data persistence
+monitoring/grafana_db/*
 
 # IDEs
 .vscode/
@@ -76,10 +78,10 @@ Thumbs.db
 deployment/docker/.localstack/
 
 # Terraform
-infrastructure/terraform/.terraform/
-infrastructure/terraform/*.tfstate
-infrastructure/terraform/*.tfstate.*
-infrastructure/terraform/tfplan
+infra_aws/terraform/.terraform/
+infra_aws/terraform/*.tfstate
+infra_aws/terraform/*.tfstate.*
+infra_aws/terraform/tfplan
 
 
 # Additional caches

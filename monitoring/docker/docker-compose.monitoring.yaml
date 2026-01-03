@@ -1,0 +1,110 @@
+# ============================================
+# Docker Compose - Monitoring Services
+# ============================================
+# Optional monitoring infrastructure: Grafana + Adminer
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.monitoring.yaml up -d
+# ============================================
+#
+# Prerequisites:
+#   - Main infrastructure must be running (make infra-up)
+#   - Monitoring database must be initialized (make init-db)
+#
+# Services:
+#   - Grafana: Dashboards and visualization (port 3000)
+#   - Adminer: Database administration UI (port 8081)
+# ============================================
+
+services:
+  # ============================================
+  # Grafana - Visualization & Dashboards
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+      - POSTGRES_USER=${POSTGRES_USER:-mlflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mlflow}
+      - POSTGRES_HOST=mlflow-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=monitoring
+    volumes:
+      # Persistent Grafana data (dashboards, users, etc.)
+      # Path is relative to project root (since compose uses mlops_services/docker first)
+      - ../../monitoring/grafana_db:/var/lib/grafana
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat > /etc/grafana/provisioning/datasources/datasource.yml <<EOF
+        apiVersion: 1
+
+        datasources:
+          - name: Evidently_Monitoring
+            type: postgres
+            access: proxy
+            url: $${POSTGRES_HOST}:$${POSTGRES_PORT}
+            database: $${POSTGRES_DATABASE}
+            user: $${POSTGRES_USER}
+            secureJsonData:
+              password: $${POSTGRES_PASSWORD}
+            jsonData:
+              sslmode: disable
+              postgresVersion: 1500
+              timescaledb: false
+            isDefault: false
+            editable: true
+        EOF
+        exec /run.sh
+    depends_on:
+      - postgres
+    networks:
+      - mlops_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================
+  # Adminer - Database Administration UI
+  # ============================================
+  adminer:
+    image: adminer
+    container_name: adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    networks:
+      - mlops_network
+    environment:
+      - ADMINER_DEFAULT_SERVER=mlflow-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  grafana_data:
+    name: grafana_data
+    driver: local
+
+# ============================================
+# Networks - Join existing mlops_network
+# ============================================
+networks:
+  mlops_network:
+    external: true
+    name: mlops_network

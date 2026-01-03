@@ -3,7 +3,7 @@
 #
 # IMPORTANT: This configuration is designed for LocalStack ONLY.
 # All AWS resources are simulated locally - no real AWS services are used.
-# Use with tflocal: cd infrastructure/terraform && tflocal apply
+# Use with tflocal: cd infra_aws/terraform && tflocal apply
 #
 # S3 Bucket Design:
 # - smart-logistics-data:     For raw/processed data, synced with ./data folder

@@ -72,6 +72,9 @@ python src/your_script.py
 | `make s3-sync` | Manual bidirectional sync (Local ↔ S3) |
 | `make clean` | Clean Python caches (Safe: keeps infra state) |
 | `make reset-infra` | **Destructive**: Delete all LocalStack & Terraform state |
+| `make init-db` | Initialize monitoring database in mlflow-postgres |
+| `make monitoring` | Start monitoring services (Grafana + Adminer) |
+| `make monitoring-down` | Stop monitoring services |
 
 ## 🌐 Service URLs (after `make infra-up`)
 
@@ -80,6 +83,48 @@ python src/your_script.py
 | LocalStack | http://localhost:4566 | AWS emulation (S3, IAM) |
 | PostgreSQL | localhost:5432 | MLflow backend store |
 | MLflow UI | http://localhost:5001 | Experiment tracking |
+| Airflow UI | http://localhost:8080 | Workflow orchestration |
+| Grafana | http://localhost:3000 | Monitoring dashboards (optional) |
+| Adminer | http://localhost:8081 | Database admin UI (optional) |
+
+## 📊 Monitoring
+
+The project includes optional monitoring infrastructure using **Grafana** (for dashboards) and **Adminer** (for database administration). These services use the existing `mlflow-postgres` container and create a separate `monitoring` database for Evidently metrics.
+
+### Setup Monitoring
+
+```bash
+# 1. Ensure infrastructure is running
+make infra-up
+
+# 2. Initialize the monitoring database
+make init-db
+
+# 3. Start monitoring services
+make monitoring
+```
+
+### Access Monitoring Services
+
+- **Grafana**: http://localhost:3000
+  - Username: `admin`
+  - Password: `admin`
+  - The PostgreSQL datasource "Evidently_Monitoring" is automatically configured to connect to the `monitoring` database
+
+- **Adminer**: http://localhost:8081
+  - System: `PostgreSQL`
+  - Server: `mlflow-postgres`
+  - Username: `mlflow` (or value from `POSTGRES_USER` env var)
+  - Password: `mlflow` (or value from `POSTGRES_PASSWORD` env var)
+  - Database: `monitoring` (or `mlflow` for MLflow data)
+
+### Stop Monitoring
+
+```bash
+make monitoring-down
+```
+
+**Note**: The monitoring database persists in the `mlflow-postgres` container. To remove it, you would need to manually drop it via Adminer or `psql`.
 
 ## 💾 Persistent Storage (S3 Buckets & Local Folders)
 
@@ -117,6 +162,8 @@ Smart-Logistics-Supply-Chain-ML/
 ├── mlflow_db/              # 📦 PostgreSQL data persistence
 ├── deployment/docker/      # Docker Compose (infrastructure only)
 ├── infrastructure/terraform/ # IaC for LocalStack
+├── config/grafana/        # Grafana provisioning configs
+├── scripts/infra/         # Infrastructure initialization scripts
 ├── tests/                  # Pytest test suite
 ├── configs/                # YAML configurations
 └── notebooks/              # Jupyter notebooks

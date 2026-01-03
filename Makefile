@@ -16,15 +16,17 @@
 # ============================================
 
 .PHONY: help setup clean fix-style type-check test \
-        infra-up infra-down infra-init infra-status infra-logs s3-sync reset-infra \
-        pipeline
+        infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
+        pipeline grafana-up grafana-down
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
 POETRY := $(shell command -v poetry 2>/dev/null || echo "$$HOME/.local/bin/poetry")
-COMPOSE := docker compose -f deployment/docker/docker-compose.yaml
-COMPOSE_AIRFLOW := docker compose -f deployment/docker/docker-compose.airflow.yaml
-TF := cd infrastructure/terraform && $(POETRY) run tflocal
+COMPOSE_AWS := docker compose -f infra_aws/docker/docker-compose.yaml
+COMPOSE_MLOPS := docker compose -f mlops_services/docker/docker-compose.yaml
+COMPOSE_AIRFLOW := docker compose -f mlops_services/docker/docker-compose.airflow.yaml
+COMPOSE_MONITORING := docker compose -f mlops_services/docker/docker-compose.yaml -f monitoring/docker/docker-compose.monitoring.yaml
+TF := cd infra_aws/terraform && $(POETRY) run tflocal
 # LocalStack AWS CLI - uses awslocal via Poetry
 AWS_LOCAL := $(POETRY) run awslocal
 
@@ -42,19 +44,24 @@ help: ## Show this help message
 	@echo "$(BOLD)$(CYAN)Smart Logistics MLOps$(RESET) - Available Commands:"
 	@echo ""
 	@echo "$(YELLOW)Setup & Environment:$(RESET)"
-	@grep -E '^(setup|clean|reset-infra):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(setup|clean):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Quality & Testing:$(RESET)"
 	@grep -E '^(fix-style|type-check|test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Infrastructure:$(RESET)"
-	@grep -E '^(infra-up|infra-down|infra-init|infra-status|infra-logs|s3-sync):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(infra-up|infra-down|s3-sync|reset-infra):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)ML Services:$(RESET)"
+	@grep -E '^(ml-services-up|ml-services-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)Monitoring:$(RESET)"
+	@grep -E '^(grafana-up|grafana-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)ML Pipeline:$(RESET)"
 	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(BOLD)Quick Start:$(RESET) make setup"
-	@echo ""
+
 
 # --- � Setup (Single unified target) ---
 setup: ## Create Python 3.12 environment and install all dependencies
@@ -129,7 +136,8 @@ test: ## Run tests with pytest
 # --- 🧹 Cleaning ---
 clean: ## Clean Python caches (preserves all infrastructure state)
 	@echo "$(CYAN)🧹 Cleaning Python caches...$(RESET)"
-	$(COMPOSE) down 2>/dev/null || true
+	$(COMPOSE_MLOPS) down 2>/dev/null || true
+	$(COMPOSE_AWS) down 2>/dev/null || true
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
@@ -141,73 +149,106 @@ clean: ## Clean Python caches (preserves all infrastructure state)
 reset-infra: ## ⚠️  Wipe all infrastructure state (Terraform, LocalStack)
 	@echo "$(RED)⚠️  Resetting infrastructure state...$(RESET)"
 	@echo "$(RED)This will delete LocalStack data and Terraform state.$(RESET)"
-	$(COMPOSE) down -v 2>/dev/null || true
-	rm -rf deployment/docker/.localstack
-	rm -rf infrastructure/terraform/.terraform
-	rm -f infrastructure/terraform/terraform.tfstate*
-	rm -f infrastructure/terraform/tfplan
+	$(COMPOSE_AWS) down -v 2>/dev/null || true
+	$(COMPOSE_MLOPS) down -v 2>/dev/null || true
+	rm -rf infra_aws/.localstack
+	rm -rf infra_aws/terraform/.terraform
+	rm -f infra_aws/terraform/terraform.tfstate*
+	rm -f infra_aws/terraform/tfplan
 	@echo "$(GREEN)✓ Reset: Infrastructure state cleared$(RESET)"
 	@echo "$(YELLOW)ℹ Note: Persistent folders (data/, models/, mlflow_db/) were NOT deleted.$(RESET)"
 
 # --- 🏗️ Infrastructure ---
-infra-up: ## Start infrastructure services (LocalStack, Postgres, MLflow)
-	@echo "$(CYAN)🏗️ Starting infrastructure services...$(RESET)"
+infra-up: ## Start AWS infrastructure (LocalStack, Terraform, S3 sync)
+	@echo "$(CYAN)🏗️ Starting AWS infrastructure...$(RESET)"
 	@echo "$(CYAN)  Creating persistent folders if needed...$(RESET)"
-	@mkdir -p data models mlflow_db airflow_db
-	$(COMPOSE) up -d --wait
+	@mkdir -p data models
+	@echo "$(CYAN)  Starting LocalStack...$(RESET)"
+	@$(COMPOSE_AWS) up -d --wait
+	@echo ""
+	@echo "$(BOLD)$(CYAN)🔧 Applying Terraform resources...$(RESET)"
+	@echo "$(CYAN)  Using tflocal for LocalStack...$(RESET)"
+	@$(TF) init -input=false
+	@$(TF) apply -auto-approve
+	@echo "$(GREEN)✓ Infrastructure initialized!$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)S3 Buckets created (LocalStack):$(RESET)"
+	@$(AWS_LOCAL) s3 ls 2>/dev/null || true
+	@echo ""
+	@echo "$(BOLD)$(CYAN)🔄 Syncing S3 buckets with local folders...$(RESET)"
+	@$(POETRY) run python infra_aws/scripts/s3_sync.py || true
+	@echo "$(GREEN)✓ S3 sync complete!$(RESET)"
+	@echo ""
+	@echo "$(GREEN)✓ AWS infrastructure ready!$(RESET)"
+	@echo "  • LocalStack:  http://localhost:4566"
+	@echo ""
+	@echo "$(YELLOW)S3 Buckets (synced with local folders):$(RESET)"
+	@echo "  • s3://smart-logistics-data   ↔ ./data"
+	@echo "  • s3://mlflow-model-registry  ↔ ./models"
+
+ml-services-up: ## Start MLOps services (Postgres, MLflow, Airflow)
+	@echo "$(CYAN)🏗️ Starting MLOps services...$(RESET)"
+	@echo "$(CYAN)  Creating persistent folders if needed...$(RESET)"
+	@mkdir -p mlops_services/mlflow_db mlops_services/airflow_db
+	@echo "$(CYAN)  Starting MLOps services (Postgres, MLflow)...$(RESET)"
+	@$(COMPOSE_MLOPS) up -d --wait
 	@echo ""
 	@echo "$(BOLD)$(CYAN)🌀 Starting Airflow...$(RESET)"
 	@$(COMPOSE_AIRFLOW) build
 	@$(COMPOSE_AIRFLOW) up -d
 	@echo ""
-	@echo "$(GREEN)✓ Infrastructure & Airflow ready!$(RESET)"
-	@echo "  • LocalStack:  http://localhost:4566"
+	@echo "$(GREEN)✓ MLOps services ready!$(RESET)"
 	@echo "  • PostgreSQL:  localhost:5432"
 	@echo "  • MLflow UI:   http://localhost:5001"
 	@echo "  • Airflow UI:  http://localhost:8080 (Login: admin/admin)"
 	@echo ""
-	@echo "$(YELLOW)S3 Buckets (synced with local folders):$(RESET)"
-	@echo "  • s3://smart-logistics-data   ↔ ./data"
-	@echo "  • s3://mlflow-model-registry  ↔ ./models"
-	@echo ""
 	@echo "$(YELLOW)Persistent storage:$(RESET)"
-	@echo "  • PostgreSQL data            → ./mlflow_db"
-	@echo "  • Airflow data               → ./airflow_db"
+	@echo "  • PostgreSQL data            → ./mlops_services/mlflow_db"
+	@echo "  • Airflow data               → ./mlops_services/airflow_db"
 
-infra-down: ## Stop all infrastructure services (syncs S3 to local first)
+infra-down: ## Stop AWS infrastructure (syncs S3 to local first)
 	@echo "$(CYAN)🔄 Syncing S3 buckets to local folders...$(RESET)"
-	@$(POETRY) run python scripts/s3_sync.py || true
+	@$(POETRY) run python infra_aws/scripts/s3_sync.py || true
+	@echo "$(CYAN)🛑 Stopping AWS infrastructure...$(RESET)"
+	@$(COMPOSE_AWS) down
+	@echo "$(GREEN)✓ AWS infrastructure stopped$(RESET)"
+	@echo "$(YELLOW)ℹ Persistent data preserved in: data/, models/$(RESET)"
+
+ml-services-down: ## Stop MLOps services (Postgres, MLflow, Airflow)
 	@echo "$(CYAN)🛑 Stopping Airflow...$(RESET)"
 	@$(COMPOSE_AIRFLOW) down
-	@echo "$(CYAN)🛑 Stopping infrastructure services...$(RESET)"
-	$(COMPOSE) down
-	@echo "$(GREEN)✓ Infrastructure & Airflow stopped$(RESET)"
-	@echo "$(YELLOW)ℹ Persistent data preserved in: data/, models/, mlflow_db/, airflow_db/$(RESET)"
-
-infra-logs: ## Show logs from infrastructure services
-	$(COMPOSE) logs -f
-
-infra-init: ## Apply Terraform resources (S3 buckets, IAM roles, sync local→S3)
-	@echo "$(CYAN)🏗️ Initializing infrastructure resources...$(RESET)"
-	@echo "$(CYAN)  Using tflocal for LocalStack...$(RESET)"
-	$(TF) init -input=false
-	$(TF) apply -auto-approve
-	@echo "$(GREEN)✓ Infrastructure initialized!$(RESET)"
-	@echo ""
-	@echo "$(YELLOW)S3 Buckets created (LocalStack):$(RESET)"
-	@$(AWS_LOCAL) s3 ls 2>/dev/null || true
-
-infra-status: ## Show status of Terraform resources
-	@echo "$(CYAN)📊 Checking infrastructure status...$(RESET)"
-	$(TF) validate
-	$(TF) plan -out=tfplan
-	@echo "$(GREEN)✓ Infrastructure validation complete$(RESET)"
+	@echo "$(CYAN)🛑 Stopping MLOps services...$(RESET)"
+	@$(COMPOSE_MLOPS) down
+	@echo "$(GREEN)✓ MLOps services stopped$(RESET)"
+	@echo "$(YELLOW)ℹ Persistent data preserved in: mlops_services/mlflow_db/, mlops_services/airflow_db/$(RESET)"
 
 s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
-	@$(POETRY) run python scripts/s3_sync.py
+	@$(POETRY) run python infra_aws/scripts/s3_sync.py
+
+# --- 📊 Monitoring ---
+grafana-up: ## Start Grafana services (initializes database and starts Grafana + Adminer)
+	@echo "$(CYAN)📊 Starting Grafana services...$(RESET)"
+	@echo "$(YELLOW)  Prerequisites:$(RESET)"
+	@echo "    • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
+	@echo ""
+	@echo "$(CYAN)  Initializing monitoring database...$(RESET)"
+	@./monitoring/scripts/init_monitoring_db.sh
+	@echo "$(GREEN)✓ Monitoring database ready$(RESET)"
+	@echo ""
+	@echo "$(CYAN)  Starting Grafana and Adminer...$(RESET)"
+	@$(COMPOSE_MONITORING) up -d --wait
+	@echo ""
+	@echo "$(GREEN)✓ Grafana services ready!$(RESET)"
+	@echo "  • Grafana:  http://localhost:3000 (Login: admin/admin)"
+	@echo "  • Adminer:  http://localhost:8081"
+
+grafana-down: ## Stop Grafana services (Grafana + Adminer)
+	@echo "$(CYAN)🛑 Stopping Grafana services...$(RESET)"
+	@$(COMPOSE_MONITORING) down
+	@echo "$(GREEN)✓ Grafana services stopped$(RESET)"
 
 # ---  ML Pipeline ---
-pipeline: ## Run the full ML pipeline (ingest → preprocess → train)
+pipeline: ## Run the full ML pipeline on your local machine using MLOps services and AWS infrastructure (ingest → preprocess → train)
 	@echo "$(BOLD)$(CYAN)🚀 Running ML Pipeline$(RESET)"
 	@echo ""
 	@echo "$(CYAN)Step 1/3: Data Ingestion$(RESET)"

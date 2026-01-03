@@ -1,0 +1,45 @@
+# ============================================
+# Docker Compose - AWS Infrastructure (LocalStack)
+# ============================================
+# LocalStack AWS Cloud Emulator for local development
+# Usage: docker compose -f infra_aws/docker/docker-compose.yaml up -d
+# ============================================
+
+services:
+  # ============================================
+  # LocalStack - AWS Cloud Emulator
+  # ============================================
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack
+    ports:
+      - "4566:4566"           # LocalStack Gateway
+      - "4510-4559:4510-4559" # External services port range
+    environment:
+      - SERVICES=s3,iam,sts,rds
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-${LOCALSTACK_TOKEN:-}}
+      - DEBUG=${DEBUG:-0}
+      - PERSISTENCE=1
+      - LOCALSTACK_HOST=localhost
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "../.localstack:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mlops_network
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  mlops_network:
+    name: mlops_network
+    driver: bridge
