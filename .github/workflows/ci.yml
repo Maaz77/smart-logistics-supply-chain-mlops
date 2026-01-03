@@ -9,9 +9,9 @@ name: MLOps CI
 
 on:
   push:
-    branches: [master, develop, "feature/**"]
+    branches: [master]
   pull_request:
-    branches: [master, develop]
+    branches: [master]
 
 env:
   PYTHON_VERSION: "3.12"
@@ -95,11 +95,11 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      - name: Start Infrastructure (LocalStack, Postgres, MLflow)
+      - name: Start AWS Infrastructure (LocalStack, Terraform, S3 sync)
         run: make infra-up
 
-      - name: Initialize Infrastructure (Terraform)
-        run: make infra-init
+      - name: Start MLOps Services (Postgres, MLflow, Airflow)
+        run: make ml-services-up
 
       - name: Validate Infrastructure
         run: |
@@ -110,15 +110,18 @@ jobs:
           # LocalStack
           curl -f http://localhost:4566/_localstack/health
 
+          # PostgreSQL
+          docker exec mlflow-postgres pg_isready -U mlflow || echo "PostgreSQL check failed"
+
           # MLflow UI
           curl -f http://localhost:5001/health || echo "MLflow UI check skipped (might be behind proxy/redirect)"
 
           echo "✅ Infrastructure validation complete"
 
-      - name: Show Infrastructure Logs (if failed)
-        if: failure()
-        run: make infra-logs
+      - name: Stop MLOps Services
+        if: always()
+        run: make ml-services-down
 
-      - name: Stop Infrastructure
+      - name: Stop AWS Infrastructure
         if: always()
         run: make infra-down
