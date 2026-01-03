@@ -62,6 +62,8 @@ mlops_services/airflow_db/*
 
 # Grafana data persistence
 monitoring/grafana_db/*
+# Grafana generated datasource config (generated from template)
+monitoring/grafana/provisioning/datasources/datasources.yml
 
 # IDEs
 .vscode/

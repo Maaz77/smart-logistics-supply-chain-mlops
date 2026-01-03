@@ -32,37 +32,61 @@ services:
       - POSTGRES_HOST=mlflow-postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DATABASE=monitoring
+      # Ensure Grafana waits for network to be ready
+      - GF_DATABASE_TYPE=sqlite3
+      - GF_DATABASE_PATH=/var/lib/grafana/grafana.db
     volumes:
       # Persistent Grafana data (dashboards, users, etc.)
       # Path is relative to project root (since compose uses mlops_services/docker first)
       - ../../monitoring/grafana_db:/var/lib/grafana
+      # Grafana provisioning configuration (datasources, dashboards, etc.)
+      - ../../monitoring/grafana/provisioning:/etc/grafana/provisioning
     command:
       - sh
       - -c
       - |
-        mkdir -p /etc/grafana/provisioning/datasources
-        cat > /etc/grafana/provisioning/datasources/datasource.yml <<EOF
-        apiVersion: 1
+        # Wait for PostgreSQL to be accessible (simple TCP connection test)
+        echo "Waiting for PostgreSQL at $${POSTGRES_HOST}:$${POSTGRES_PORT}..."
+        for i in $$(seq 1 30); do
+          if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$${POSTGRES_HOST}/$${POSTGRES_PORT}" 2>/dev/null; then
+            echo "PostgreSQL is ready!"
+            break
+          fi
+          echo "Attempt $$i/30: PostgreSQL not ready yet, waiting..."
+          sleep 2
+        done
 
-        datasources:
-          - name: Evidently_Monitoring
-            type: postgres
-            access: proxy
-            url: $${POSTGRES_HOST}:$${POSTGRES_PORT}
-            database: $${POSTGRES_DATABASE}
-            user: $${POSTGRES_USER}
-            secureJsonData:
-              password: $${POSTGRES_PASSWORD}
-            jsonData:
-              sslmode: disable
-              postgresVersion: 1500
-              timescaledb: false
-            isDefault: false
-            editable: true
-        EOF
+        # Verify datasource config file exists (should be pre-generated on host)
+        if [ -f /etc/grafana/provisioning/datasources/datasources.yml ]; then
+          echo "✓ Datasource configuration file found"
+          echo "  File: /etc/grafana/provisioning/datasources/datasources.yml"
+          echo ""
+          echo "Configuration content:"
+          cat /etc/grafana/provisioning/datasources/datasources.yml
+          echo ""
+          echo "File permissions:"
+          ls -la /etc/grafana/provisioning/datasources/datasources.yml
+          echo ""
+        else
+          echo "⚠ Warning: Datasource configuration file not found!"
+          echo "  Expected: /etc/grafana/provisioning/datasources/datasources.yml"
+          echo "  Run: ./monitoring/scripts/generate_datasource_config.sh"
+          echo ""
+          echo "Directory contents:"
+          ls -la /etc/grafana/provisioning/datasources/ 2>/dev/null || echo "  Directory does not exist"
+          echo ""
+        fi
+
+        # Test connectivity to PostgreSQL
+        echo "Testing PostgreSQL connectivity..."
+        if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$${POSTGRES_HOST}/$${POSTGRES_PORT}" 2>/dev/null; then
+          echo "✓ PostgreSQL is reachable from Grafana container"
+        else
+          echo "⚠ Warning: Cannot reach PostgreSQL at $${POSTGRES_HOST}:$${POSTGRES_PORT}"
+          echo "  Make sure both containers are on the same Docker network"
+        fi
+
         exec /run.sh
-    depends_on:
-      - postgres
     networks:
       - mlops_network
     healthcheck:
@@ -80,8 +104,6 @@ services:
     container_name: adminer
     ports:
       - "8081:8080"
-    depends_on:
-      - postgres
     networks:
       - mlops_network
     environment:

@@ -23,6 +23,7 @@ pyarrow = "^18.0.0"
 xgboost = "^3.1.2"
 lightgbm = "^4.6.0"
 dvc-s3 = "^3.2.2"
+evidently = "^0.5.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

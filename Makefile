@@ -17,7 +17,7 @@
 
 .PHONY: help setup clean fix-style type-check test \
         infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
-        pipeline grafana-up grafana-down
+        pipeline grafana-up grafana-down monitoring
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
@@ -56,7 +56,7 @@ help: ## Show this help message
 	@grep -E '^(ml-services-up|ml-services-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Monitoring:$(RESET)"
-	@grep -E '^(grafana-up|grafana-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(grafana-up|grafana-down|monitoring):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)ML Pipeline:$(RESET)"
 	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
@@ -230,22 +230,49 @@ grafana-up: ## Start Grafana services (initializes database and starts Grafana +
 	@echo "$(CYAN)📊 Starting Grafana services...$(RESET)"
 	@echo "$(YELLOW)  Prerequisites:$(RESET)"
 	@echo "    • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
+	@echo "    • MLOps services must be running: $(CYAN)make ml-services-up$(RESET)"
 	@echo ""
 	@echo "$(CYAN)  Initializing monitoring database...$(RESET)"
 	@./monitoring/scripts/init_monitoring_db.sh
 	@echo "$(GREEN)✓ Monitoring database ready$(RESET)"
 	@echo ""
+	@echo "$(CYAN)  Generating Grafana datasource configuration...$(RESET)"
+	@./monitoring/scripts/generate_datasource_config.sh
+	@echo "$(GREEN)✓ Datasource configuration ready$(RESET)"
+	@echo ""
 	@echo "$(CYAN)  Starting Grafana and Adminer...$(RESET)"
-	@$(COMPOSE_MONITORING) up -d --wait
+	@$(COMPOSE_MONITORING) up -d --wait grafana adminer
 	@echo ""
 	@echo "$(GREEN)✓ Grafana services ready!$(RESET)"
 	@echo "  • Grafana:  http://localhost:3000 (Login: admin/admin)"
 	@echo "  • Adminer:  http://localhost:8081"
 
-grafana-down: ## Stop Grafana services (Grafana + Adminer)
+grafana-down: ## Stop Grafana services (Grafana + Adminer) - does not affect MLflow/PostgreSQL
 	@echo "$(CYAN)🛑 Stopping Grafana services...$(RESET)"
-	@$(COMPOSE_MONITORING) down
-	@echo "$(GREEN)✓ Grafana services stopped$(RESET)"
+	@$(COMPOSE_MONITORING) stop grafana adminer
+	@$(COMPOSE_MONITORING) rm -f grafana adminer
+	@echo "$(GREEN)✓ Grafana services stopped (MLflow/PostgreSQL still running)$(RESET)"
+
+monitoring: ## Run model monitoring simulation (calculates Evidently metrics day-by-day and logs to database)
+	@echo "$(BOLD)$(CYAN)📊 Running Model Monitoring Simulation$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)Prerequisites:$(RESET)"
+	@echo "  • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
+	@echo "  • Monitoring database initialized: $(CYAN)make grafana-up$(RESET)"
+	@echo ""
+	@echo "$(CYAN)Starting monitoring simulation...$(RESET)"
+	@echo "$(YELLOW)This will process validation data day-by-day with 20-second pauses$(RESET)"
+	@echo ""
+	@$(POETRY) run python -m src.monitoring
+	@echo ""
+	@echo "$(GREEN)$(BOLD)════════════════════════════════════════$(RESET)"
+	@echo "$(GREEN)$(BOLD)✓ Monitoring simulation complete!$(RESET)"
+	@echo "$(GREEN)$(BOLD)════════════════════════════════════════$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)View results:$(RESET)"
+	@echo "  • Grafana:  $(CYAN)http://localhost:3000$(RESET) (Login: admin/admin)"
+	@echo "  • Adminer:  $(CYAN)http://localhost:8081$(RESET)"
+	@echo ""
 
 # ---  ML Pipeline ---
 pipeline: ## Run the full ML pipeline on your local machine using MLOps services and AWS infrastructure (ingest → preprocess → train)
