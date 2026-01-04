@@ -17,7 +17,7 @@
 
 .PHONY: help setup clean fix-style type-check test \
         infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
-        pipeline grafana-up grafana-down monitoring
+        pipeline grafana-up grafana-down monitoring serving serving-down
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
@@ -26,6 +26,7 @@ COMPOSE_AWS := docker compose -f infra_aws/docker/docker-compose.yaml
 COMPOSE_MLOPS := docker compose -f mlops_services/docker/docker-compose.yaml
 COMPOSE_AIRFLOW := docker compose -f mlops_services/docker/docker-compose.airflow.yaml
 COMPOSE_MONITORING := docker compose -f mlops_services/docker/docker-compose.yaml -f monitoring/docker/docker-compose.monitoring.yaml
+COMPOSE_SERVING := docker compose -f serving/docker/docker-compose.serving.yaml
 TF := cd infra_aws/terraform && $(POETRY) run tflocal
 # LocalStack AWS CLI - uses awslocal via Poetry
 AWS_LOCAL := $(POETRY) run awslocal
@@ -60,6 +61,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "$(YELLOW)ML Pipeline:$(RESET)"
 	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)Model Serving:$(RESET)"
+	@grep -E '^(serving|serving-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 
 
@@ -301,3 +305,28 @@ pipeline: ## Run the full ML pipeline on your local machine using MLOps services
 	@echo "  • MLflow UI:   $(CYAN)http://localhost:5001$(RESET)"
 	@echo "  • S3 data:     $(CYAN)poetry run awslocal s3 ls s3://smart-logistics-data/ --recursive$(RESET)"
 	@echo ""
+
+# --- 🚀 Model Serving ---
+serving: ## Start model serving services (FastAPI + Streamlit UI)
+	@echo "$(BOLD)$(CYAN)🚀 Starting Model Serving Services$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)Prerequisites:$(RESET)"
+	@echo "  • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
+	@echo "  • MLOps services must be running: $(CYAN)make ml-services-up$(RESET)"
+	@echo ""
+	@echo "$(CYAN)Building and starting serving containers...$(RESET)"
+	@$(COMPOSE_SERVING) build
+	@$(COMPOSE_SERVING) up -d
+	@echo ""
+	@echo "$(GREEN)✓ Model serving services ready!$(RESET)"
+	@echo "  • FastAPI API:  http://localhost:8000"
+	@echo "  • API Docs:     http://localhost:8000/docs"
+	@echo "  • Streamlit UI: http://localhost:8501"
+	@echo ""
+	@echo "$(YELLOW)Note:$(RESET) Ensure a model is registered in MLflow with the 'production' alias:"
+	@echo "  $(CYAN)models:/LogisticsDelayModel@production$(RESET)"
+
+serving-down: ## Stop model serving services (FastAPI + Streamlit UI)
+	@echo "$(CYAN)🛑 Stopping model serving services...$(RESET)"
+	@$(COMPOSE_SERVING) down
+	@echo "$(GREEN)✓ Model serving services stopped$(RESET)"

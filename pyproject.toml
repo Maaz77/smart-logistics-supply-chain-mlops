@@ -24,6 +24,10 @@ xgboost = "^3.1.2"
 lightgbm = "^4.6.0"
 dvc-s3 = "^3.2.2"
 evidently = "^0.5.0"
+fastapi = "^0.104.0"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
+streamlit = "^1.28.0"
+requests = "^2.31.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

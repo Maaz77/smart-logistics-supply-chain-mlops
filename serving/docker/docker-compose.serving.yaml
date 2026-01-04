@@ -1,0 +1,73 @@
+# ============================================
+# Docker Compose - Model Serving Services
+# ============================================
+# FastAPI prediction API and Streamlit UI
+# ============================================
+
+services:
+  # ============================================
+  # FastAPI Prediction API
+  # ============================================
+  serving-api:
+    build:
+      context: ../..
+      dockerfile: serving/docker/Dockerfile.serving
+    container_name: serving-api
+    ports:
+      # External port 8000 -> Internal port 8000
+      # Access from host: http://localhost:8000
+      - "8000:8000"
+    environment:
+      # MLflow configuration
+      # Note: MLflow runs on internal port 5000 (external 5001 is for host access only)
+      # Container-to-container communication uses internal port 5000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://localstack:4566
+      # AWS credentials for S3 (LocalStack)
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      # PostgreSQL connection (for serving_logs)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: monitoring
+    # Note: postgres and mlflow are in mlops_services compose file
+    # They share the same mlops_network, so communication works by service name
+    # Healthcheck will wait for dependencies to be ready
+    networks:
+      - mlops_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ============================================
+  # Streamlit UI
+  # ============================================
+  serving-ui:
+    build:
+      context: ../..
+      dockerfile: serving/docker/Dockerfile.ui
+    container_name: serving-ui
+    ports:
+      - "8501:8501"
+    environment:
+      # API endpoint (container-to-container communication)
+      API_URL: http://serving-api:8000
+    depends_on:
+      serving-api:
+        condition: service_healthy
+    networks:
+      - mlops_network
+
+# ============================================
+# Networks - Join existing mlops_network
+# ============================================
+networks:
+  mlops_network:
+    external: true
+    name: mlops_network
