@@ -149,12 +149,18 @@ clean: ## Clean Python caches (preserves all infrastructure state)
 reset-infra: ## ⚠️  Wipe all infrastructure state (Terraform, LocalStack)
 	@echo "$(RED)⚠️  Resetting infrastructure state...$(RESET)"
 	@echo "$(RED)This will delete LocalStack data and Terraform state.$(RESET)"
+	@echo "$(CYAN)  Stopping containers and removing volumes...$(RESET)"
 	$(COMPOSE_AWS) down -v 2>/dev/null || true
 	$(COMPOSE_MLOPS) down -v 2>/dev/null || true
+	@echo "$(CYAN)  Removing LocalStack named volume...$(RESET)"
+	docker volume rm infra_aws_docker_localstack_data 2>/dev/null || true
+	@echo "$(CYAN)  Removing old LocalStack bind mount directory (if exists)...$(RESET)"
 	rm -rf infra_aws/.localstack
+	@echo "$(CYAN)  Removing Terraform state and working files...$(RESET)"
 	rm -rf infra_aws/terraform/.terraform
 	rm -f infra_aws/terraform/terraform.tfstate*
 	rm -f infra_aws/terraform/tfplan
+	rm -f infra_aws/terraform/.terraform.lock.hcl
 	@echo "$(GREEN)✓ Reset: Infrastructure state cleared$(RESET)"
 	@echo "$(YELLOW)ℹ Note: Persistent folders (data/, models/, mlflow_db/) were NOT deleted.$(RESET)"
 

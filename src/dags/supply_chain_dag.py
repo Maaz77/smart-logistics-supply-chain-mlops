@@ -23,7 +23,7 @@ dag = DAG(
     "supply_chain_pipeline",
     default_args=default_args,
     description="Smart Logistics Supply Chain ML Pipeline",
-    schedule_interval=timedelta(days=1),
+    schedule_interval=None,
     catchup=False,
     tags=["ml", "logistics", "pipeline"],
 )

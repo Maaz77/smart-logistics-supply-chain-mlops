@@ -20,12 +20,13 @@ services:
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-${LOCALSTACK_TOKEN:-}}
       - DEBUG=${DEBUG:-0}
       - PERSISTENCE=1
+      - DATA_DIR=/var/lib/localstack/data
       - LOCALSTACK_HOST=localhost
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
     volumes:
-      - "../.localstack:/var/lib/localstack"
+      - localstack_data:/var/lib/localstack
       - "/var/run/docker.sock:/var/run/docker.sock"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
@@ -43,3 +44,10 @@ networks:
   mlops_network:
     name: mlops_network
     driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  localstack_data:
+    driver: local
