@@ -169,3 +169,61 @@ with st.sidebar:
             st.error("❌ API is not responding")
     except Exception as e:
         st.error(f"❌ Cannot connect to API: {str(e)}")
+
+    # Model Metadata Section
+    st.header("📊 Model Information")
+    try:
+        metadata_response = requests.get(f"{API_URL}/model/metadata", timeout=5)
+        if metadata_response.status_code == 200:
+            metadata = metadata_response.json()
+
+            # Model Details
+            st.subheader("Model Details")
+            st.text(f"Name: {metadata.get('model_name', 'N/A')}")
+            st.text(f"Version: {metadata.get('model_version', 'N/A')}")
+            if metadata.get("run_id"):
+                # Display full Run ID using markdown code block to ensure it's not truncated
+                st.markdown(f"**Run ID:**")
+                st.markdown(f"```\n{metadata['run_id']}\n```")
+
+            # Training Parameters
+            st.subheader("Training Parameters")
+            params = metadata.get("parameters", {})
+            if params:
+                # Display key parameters
+                param_display = {
+                    "best_estimator": params.get("best_estimator", "N/A"),
+                    "n_iter": params.get("n_iter", "N/A"),
+                    "metric": params.get("metric", "N/A"),
+                    "train_size": params.get("train_size", "N/A"),
+                    "val_size": params.get("val_size", "N/A"),
+                    "test_size": params.get("test_size", "N/A"),
+                    "n_features": params.get("n_features", "N/A"),
+                }
+                # Add hyperparameters (best_*)
+                for key, value in params.items():
+                    if key.startswith("best_") and key != "best_estimator":
+                        param_display[key] = value
+
+                for key, value in param_display.items():
+                    st.text(f"{key}: {value}")
+
+            # Performance Metrics
+            st.subheader("Performance Metrics")
+            metrics = metadata.get("metrics", {})
+            if metrics:
+                # Validation metrics
+                if "val_roc_auc" in metrics:
+                    st.metric("Validation ROC-AUC", f"{metrics['val_roc_auc']:.4f}")
+                if "val_f1" in metrics:
+                    st.metric("Validation F1 Score", f"{metrics['val_f1']:.4f}")
+
+                # Test metrics
+                if "test_roc_auc" in metrics:
+                    st.metric("Test ROC-AUC", f"{metrics['test_roc_auc']:.4f}")
+                if "test_f1" in metrics:
+                    st.metric("Test F1 Score", f"{metrics['test_f1']:.4f}")
+        else:
+            st.warning("⚠️ Could not fetch model metadata")
+    except Exception as e:
+        st.warning(f"⚠️ Error loading model info: {str(e)}")

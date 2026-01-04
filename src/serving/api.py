@@ -43,6 +43,17 @@ MODEL_ALIAS = "production"
 CATEGORICAL_COLUMNS = ["Shipment_Status", "Traffic_Status", "Logistics_Delay_Reason"]
 
 
+class ModelMetadataResponse(BaseModel):
+    """Response model for model metadata endpoint."""
+
+    model_name: str
+    model_version: str | None
+    run_id: str | None
+    parameters: dict[str, Any]
+    metrics: dict[str, float]
+    model_uri: str | None
+
+
 class PredictionRequest(BaseModel):
     """Request model for prediction endpoint."""
 
@@ -192,6 +203,103 @@ async def health_check() -> dict[str, str]:
         "status": "healthy",
         "model_loaded": "true" if model is not None else "false",
     }
+
+
+@app.get("/model/metadata", response_model=ModelMetadataResponse)
+async def get_model_metadata() -> ModelMetadataResponse:
+    """Get model metadata from MLflow including parameters and metrics.
+
+    Returns:
+        Model metadata with parameters and performance metrics.
+    """
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model not loaded. Please check server logs for details.",
+        )
+
+    try:
+        logger.info("Fetching model metadata from MLflow...")
+        # Get MLflow client
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        mlflow_client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+        logger.info(f"MLflow client created, tracking URI: {tracking_uri}")
+
+        # Get run_id from the loaded model's metadata
+        if not hasattr(model, 'metadata'):
+            logger.error("Model does not have metadata attribute")
+            raise HTTPException(
+                status_code=500,
+                detail="Loaded model does not have metadata attribute.",
+            )
+
+        if not hasattr(model.metadata, 'run_id'):
+            logger.error("Model metadata does not have run_id")
+            raise HTTPException(
+                status_code=500,
+                detail="Loaded model does not have run_id in metadata.",
+            )
+
+        run_id = model.metadata.run_id
+        logger.info(f"Got run_id from model: {run_id}")
+
+        # Get run details from MLflow
+        try:
+            run = mlflow_client.get_run(run_id)
+            logger.info(f"Retrieved run from MLflow: {run_id}")
+        except Exception as e:
+            logger.error(f"Failed to get run from MLflow: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve run from MLflow: {str(e)}",
+            )
+
+        # Try to find the model version that corresponds to this run
+        try:
+            model_versions = mlflow_client.search_model_versions(
+                filter_string=f"name='{MODEL_NAME}'"
+            )
+            logger.info(f"Found {len(model_versions)} model versions")
+        except Exception as e:
+            logger.warning(f"Could not search model versions: {e}, continuing without version info")
+            model_versions = []
+
+        version = None
+        model_source_uri = model_uri if model_uri else None
+        for mv in model_versions:
+            if mv.run_id == run_id:
+                version = mv.version
+                model_source_uri = mv.source
+                logger.info(f"Found matching version: {version}")
+                break
+
+        # Extract parameters and metrics
+        parameters = dict(run.data.params) if run.data.params else {}
+        metrics = {k: float(v) for k, v in run.data.metrics.items()} if run.data.metrics else {}
+        logger.info(f"Extracted {len(parameters)} parameters and {len(metrics)} metrics")
+
+        return ModelMetadataResponse(
+            model_name=MODEL_NAME,
+            model_version=version,
+            run_id=run_id,
+            parameters=parameters,
+            metrics=metrics,
+            model_uri=model_source_uri,
+        )
+
+    except HTTPException as he:
+        # Re-raise HTTPExceptions as-is
+        raise he
+    except Exception as e:
+        # Extract error message
+        error_msg = str(e) if e else "Unknown error"
+        if not error_msg or error_msg.strip() == "":
+            error_msg = f"{type(e).__name__}: {repr(e)}"
+        logger.error(f"Error fetching model metadata: {error_msg}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch model metadata: {error_msg}",
+        )
 
 
 @app.get("/predict")
