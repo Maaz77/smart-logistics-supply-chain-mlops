@@ -13,6 +13,29 @@ import streamlit as st
 API_URL = os.getenv("API_URL", "http://serving-api:8000")
 PREDICT_ENDPOINT = f"{API_URL}/predict"
 
+
+def send_prediction_request(api_url: str, payload: dict) -> dict:
+    """Send prediction request to the API.
+
+    This is a pure Python function extracted from the Streamlit UI logic
+    to make it testable without requiring Streamlit to be running.
+
+    Args:
+        api_url: The full URL to the prediction endpoint.
+        payload: The request payload dictionary with 'data' key.
+
+    Returns:
+        Dictionary with prediction results or error information.
+        On success: {"prediction": int, "probability": float}
+        On error: {"error": str}
+    """
+    try:
+        response = requests.post(api_url, json=payload, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
+
 # Page configuration
 st.set_page_config(
     page_title="Logistics Delay Prediction",
@@ -107,17 +130,14 @@ with st.form("prediction_form"):
             "Logistics_Delay_Reason": logistics_delay_reason,
         }
 
-        try:
-            # Make prediction request
-            with st.spinner("Making prediction..."):
-                response = requests.post(
-                    PREDICT_ENDPOINT,
-                    json={"data": request_data},
-                    timeout=10,
-                )
-                response.raise_for_status()
-                result = response.json()
+        # Make prediction request using extracted function
+        with st.spinner("Making prediction..."):
+            result = send_prediction_request(PREDICT_ENDPOINT, {"data": request_data})
 
+        # Check if there was an error
+        if "error" in result:
+            st.error(f"Error making prediction: {result['error']}")
+        else:
             # Display results
             st.success("Prediction completed!")
             col7, col8 = st.columns(2)
@@ -134,15 +154,6 @@ with st.form("prediction_form"):
 
             # Show probability bar
             st.progress(result["probability"])
-
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error making prediction: {str(e)}")
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    st.error(f"Details: {error_detail}")
-                except Exception:
-                    st.error(f"Response: {e.response.text}")
 
 # Sidebar information
 with st.sidebar:

@@ -15,7 +15,7 @@
 #
 # ============================================
 
-.PHONY: help setup clean fix-style type-check test \
+.PHONY: help setup clean fix-style type-check test test-serving \
         infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
         pipeline grafana-up grafana-down monitoring serving serving-down
 
@@ -48,7 +48,7 @@ help: ## Show this help message
 	@grep -E '^(setup|clean):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Quality & Testing:$(RESET)"
-	@grep -E '^(fix-style|type-check|test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(fix-style|type-check|test|test-serving):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Infrastructure:$(RESET)"
 	@grep -E '^(infra-up|infra-down|s3-sync|reset-infra):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
@@ -134,6 +134,12 @@ test: ## Run tests with pytest
 	@echo "$(CYAN)🧪 Running tests...$(RESET)"
 	@$(POETRY) run pytest tests/ -v --tb=short
 	@echo "$(GREEN)✓ Tests complete$(RESET)"
+
+test-serving: ## Run integration tests for serving (API + UI)
+	@echo "$(CYAN)🧪 Running serving integration tests...$(RESET)"
+	@export PYTHONPATH=$$PYTHONPATH:. && \
+	$(POETRY) run pytest tests/test_api.py tests/test_ui.py -v --tb=short
+	@echo "$(GREEN)✓ Serving integration tests complete$(RESET)"
 
 
 # --- 🧹 Cleaning ---

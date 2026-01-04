@@ -36,6 +36,7 @@ app = FastAPI(title="Logistics Delay Prediction API", version="1.0.0")
 model = None
 model_uri = None
 categorical_encoders: dict[str, LabelEncoder] = {}
+expected_feature_order: list[str] = []
 
 # Model configuration
 MODEL_NAME = "LogisticsDelayModel"
