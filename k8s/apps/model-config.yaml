@@ -6,5 +6,5 @@ metadata:
   labels:
     app: serving-api
 data:
-  MODEL_ALIAS: "experiment"
+  MODEL_ALIAS: "testtest"
   MODEL_NAME: "LogisticsDelayModel"
