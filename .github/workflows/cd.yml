@@ -13,6 +13,8 @@
 
 name: MLOps CD
 
+run-name: ${{ github.event.workflow_run && github.event.workflow_run.head_commit.message || (github.event.head_commit && github.event.head_commit.message) || 'MLOps CD' }}
+
 on:
   workflow_run:
     workflows: ["MLops CI"]
@@ -24,6 +26,11 @@ on:
         description: 'Image tag to deploy (commit SHA)'
         required: false
         type: string
+
+# Permissions for Git operations
+permissions:
+  contents: write  # Required to push commits
+  pull-requests: read
 
 env:
   KUBERNETES_NAMESPACE: "mlops-production"
@@ -43,6 +50,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: ${{ github.event.workflow_run.head_branch || 'master' }}
+          fetch-depth: 0  # Full history for change detection
 
       - name: Get image tag from CI workflow
         id: get-tag
@@ -69,15 +77,49 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual trigger - always update
             echo "deploy_app=true" >> $GITHUB_OUTPUT
+            echo "📊 Manual trigger - will deploy"
           else
-            # Automatic trigger - check what changed
+            # Automatic trigger - check what changed in the CI workflow commit
             TRIGGER_SHA="${{ github.event.workflow_run.head_sha }}"
-            BASE_SHA=$(git merge-base $TRIGGER_SHA master)
+            BRANCH="${{ github.event.workflow_run.head_branch || 'master' }}"
 
-            if git diff --name-only $BASE_SHA $TRIGGER_SHA | grep -qE '^(src/|serving/)'; then
-              echo "deploy_app=true" >> $GITHUB_OUTPUT
+            echo "🔍 Checking changes for commit: $TRIGGER_SHA on branch: $BRANCH"
+
+            # Get the commit before the trigger commit (parent commit)
+            PREV_SHA=$(git rev-parse "$TRIGGER_SHA^" 2>/dev/null || git rev-parse "$BRANCH~1" 2>/dev/null || echo "")
+
+            # Try multiple methods to find previous commit
+            if [ -z "$PREV_SHA" ] || [ "$PREV_SHA" == "$TRIGGER_SHA" ]; then
+              # Try to get the commit before using different methods
+              PREV_SHA=$(git log --format="%H" -n 2 "$TRIGGER_SHA" 2>/dev/null | tail -1 || echo "")
+            fi
+
+            if [ -z "$PREV_SHA" ] || [ "$PREV_SHA" == "$TRIGGER_SHA" ]; then
+              # Still can't find parent, check files in the commit itself
+              echo "⚠️  Could not find previous commit, checking files in current commit"
+              COMMIT_FILES=$(git show --name-only --pretty=format: "$TRIGGER_SHA" 2>/dev/null | grep -v "^$" || echo "")
+              if echo "$COMMIT_FILES" | grep -qE '^(src/|serving/)'; then
+                echo "deploy_app=true" >> $GITHUB_OUTPUT
+                echo "✅ App code files found in commit"
+              else
+                # If CI completed successfully and we can't detect, assume app changed (safer)
+                echo "deploy_app=true" >> $GITHUB_OUTPUT
+                echo "⚠️  Assuming app changed (CI workflow completed successfully)"
+              fi
             else
-              echo "deploy_app=false" >> $GITHUB_OUTPUT
+              # Check what changed between previous commit and trigger commit
+              CHANGED_FILES=$(git diff --name-only "$PREV_SHA" "$TRIGGER_SHA" 2>/dev/null || echo "")
+              echo "Changed files between $PREV_SHA and $TRIGGER_SHA:"
+              echo "$CHANGED_FILES"
+
+              # Check if any file in src/ or serving/ directories changed
+              if echo "$CHANGED_FILES" | grep -qE '^(src/|serving/)'; then
+                echo "deploy_app=true" >> $GITHUB_OUTPUT
+                echo "✅ App code changes detected"
+              else
+                echo "deploy_app=false" >> $GITHUB_OUTPUT
+                echo "ℹ️  No app code changes detected"
+              fi
             fi
           fi
 
@@ -118,7 +160,9 @@ jobs:
             echo "ℹ️  No changes to commit (images may already be up to date)"
           else
             git commit -m "chore(deploy): update image tags to ${{ steps.get-tag.outputs.image_tag }} [skip ci]"
-            git push
+            # Configure remote URL with token for authentication
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git push origin HEAD:${{ github.event.workflow_run.head_branch || 'master' }}
             echo "✅ Pushed deployment updates to Git"
           fi
 

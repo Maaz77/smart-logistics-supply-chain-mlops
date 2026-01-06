@@ -44,6 +44,7 @@ MODEL_ALIAS = os.getenv("MODEL_ALIAS")
 CATEGORICAL_COLUMNS = ["Shipment_Status", "Traffic_Status", "Logistics_Delay_Reason"]
 logger.info(f"Heeeey there, the model name is: {MODEL_NAME}")
 logger.info(f"Heeeey there, the model alias is: {MODEL_ALIAS}")
+logger.info("I added this line to trigger ci/cd jobs")
 
 class ModelMetadataResponse(BaseModel):
     """Response model for model metadata endpoint."""
