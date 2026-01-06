@@ -28,7 +28,7 @@ spec:
         # Model configuration - from ConfigMap (allows switching models)
 
         - name: MODEL_ALIAS
-          value: "testtest"
+          value: "production"
         - name: MODEL_NAME
           value: "LogisticsDelayModel"
         # MLflow configuration - using host.docker.internal to reach Docker Compose services
