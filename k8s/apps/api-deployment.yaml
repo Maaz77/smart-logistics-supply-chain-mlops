@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: maazamin98/mlops-serving-api:latest
+        image: maazamin98/mlops-serving-api:bf90651
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

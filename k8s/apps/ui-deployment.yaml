@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: ui
-        image: maazamin98/mlops-serving-ui:latest
+        image: maazamin98/mlops-serving-ui:bf90651
         ports:
         - containerPort: 8501
           name: http
