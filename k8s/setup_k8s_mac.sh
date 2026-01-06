@@ -97,6 +97,6 @@ echo "${GREEN}${BOLD}═══════════════════�
 echo ""
 echo "${YELLOW}ArgoCD Access:${RESET}"
 echo "  • Get admin password: ${CYAN}kubectl -n ${ARGOCD_NAMESPACE} get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d${RESET}"
-echo "  • Port forward: ${CYAN}kubectl port-forward svc/argocd-server -n ${ARGOCD_NAMESPACE} 8080:443${RESET}"
-echo "  • Then access: ${CYAN}https://localhost:8080${RESET}"
+echo "  • Port forward: ${CYAN}kubectl port-forward svc/argocd-server -n ${ARGOCD_NAMESPACE} 8088:443${RESET}"
+echo "  • Then access: ${CYAN}https://localhost:8088${RESET}"
 echo ""

@@ -474,6 +474,6 @@ argocd-password: ## Print ArgoCD admin password
 	echo "$(GREEN)Password:$(RESET) $(BOLD)$$PASSWORD$(RESET)"; \
 	echo ""; \
 	echo "$(YELLOW)Access ArgoCD:$(RESET)"; \
-	echo "  1. Port forward: $(CYAN)kubectl port-forward svc/argocd-server -n argocd 8080:443$(RESET)"; \
-	echo "  2. Open browser: $(CYAN)https://localhost:8080$(RESET)"; \
+	echo "  1. Port forward: $(CYAN)kubectl port-forward svc/argocd-server -n argocd 8088:443$(RESET)"; \
+	echo "  2. Open browser: $(CYAN)https://localhost:8088$(RESET)"; \
 	echo "  3. Login with the credentials above"
