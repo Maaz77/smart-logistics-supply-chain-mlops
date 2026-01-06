@@ -39,8 +39,8 @@ categorical_encoders: dict[str, LabelEncoder] = {}
 expected_feature_order: list[str] = []
 
 # Model configuration
-MODEL_NAME = os.getenv("MODEL_NAME", "LogisticsDelayModel")  # Read from environment variable
-MODEL_ALIAS = os.getenv("MODEL_ALIAS", "production")  # Read from environment variable
+MODEL_NAME = os.getenv("MODEL_NAME")
+MODEL_ALIAS = os.getenv("MODEL_ALIAS")
 CATEGORICAL_COLUMNS = ["Shipment_Status", "Traffic_Status", "Logistics_Delay_Reason"]
 
 
