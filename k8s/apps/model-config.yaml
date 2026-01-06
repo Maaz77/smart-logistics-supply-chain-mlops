@@ -6,5 +6,5 @@ metadata:
   labels:
     app: serving-api
 data:
-  MODEL_ALIAS: "production"  # Change to "experiment" or other alias to switch models
+  MODEL_ALIAS: "experiment"
   MODEL_NAME: "LogisticsDelayModel"
