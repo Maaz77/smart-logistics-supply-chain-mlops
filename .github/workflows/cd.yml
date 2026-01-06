@@ -1,0 +1,148 @@
+# ============================================
+# MLOps CD Pipeline (Continuous Deployment)
+# ============================================
+# This workflow handles:
+# - Updating Kubernetes deployment manifests with new image tags
+# - Committing and pushing updated YAMLs to Git
+# - ArgoCD automatically syncs the changes
+# ============================================
+# Prerequisites:
+# - CI workflow must complete successfully
+# - Docker images must be built and pushed
+# ============================================
+
+name: MLOps CD
+
+on:
+  workflow_run:
+    workflows: ["MLops CI"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (commit SHA)'
+        required: false
+        type: string
+
+env:
+  KUBERNETES_NAMESPACE: "mlops-production"
+
+
+jobs:
+  update-and-deploy:
+    name: Update Deployment and Deploy
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event.workflow_run.head_branch || 'master' }}
+
+      - name: Get image tag from CI workflow
+        id: get-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger - use provided tag or current commit
+            if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+              echo "image_tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            else
+              echo "image_tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            fi
+          else
+            # Automatic trigger - get from CI workflow commit SHA
+            TRIGGER_SHA="${{ github.event.workflow_run.head_sha }}"
+            echo "image_tag=$(git rev-parse --short $TRIGGER_SHA)" >> $GITHUB_OUTPUT
+          fi
+
+          IMAGE_TAG=$(cat $GITHUB_OUTPUT | grep image_tag | cut -d= -f2)
+          echo "📦 Image tag: ${IMAGE_TAG}"
+
+      - name: Check if app code changed
+        id: check-changes
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger - always update
+            echo "deploy_app=true" >> $GITHUB_OUTPUT
+          else
+            # Automatic trigger - check what changed
+            TRIGGER_SHA="${{ github.event.workflow_run.head_sha }}"
+            BASE_SHA=$(git merge-base $TRIGGER_SHA master)
+
+            if git diff --name-only $BASE_SHA $TRIGGER_SHA | grep -qE '^(src/|serving/)'; then
+              echo "deploy_app=true" >> $GITHUB_OUTPUT
+            else
+              echo "deploy_app=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+          echo "📊 Deploy app: ${{ steps.check-changes.outputs.deploy_app }}"
+
+      - name: Update deployment YAMLs
+        if: steps.check-changes.outputs.deploy_app == 'true'
+        run: |
+          IMAGE_TAG="${{ steps.get-tag.outputs.image_tag }}"
+
+          echo "📝 Updating deployment YAMLs with image tag: ${IMAGE_TAG}"
+
+          # Update API deployment
+          if [ -f "k8s/apps/api-deployment.yaml" ]; then
+            sed -i.bak "s|image:.*mlops-serving-api.*|image: ${{ secrets.DOCKER_USERNAME }}/mlops-serving-api:${IMAGE_TAG}|" \
+              k8s/apps/api-deployment.yaml
+            echo "✅ Updated API deployment"
+          fi
+
+          # Update UI deployment
+          if [ -f "k8s/apps/ui-deployment.yaml" ]; then
+            sed -i.bak "s|image:.*mlops-serving-ui.*|image: ${{ secrets.DOCKER_USERNAME }}/mlops-serving-ui:${IMAGE_TAG}|" \
+              k8s/apps/ui-deployment.yaml
+            echo "✅ Updated UI deployment"
+          fi
+
+          # Clean up backup files
+          rm -f k8s/apps/*.yaml.bak
+
+      - name: Commit and push changes
+        if: steps.check-changes.outputs.deploy_app == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/apps/api-deployment.yaml k8s/apps/ui-deployment.yaml
+
+          if git diff --staged --quiet; then
+            echo "ℹ️  No changes to commit (images may already be up to date)"
+          else
+            git commit -m "chore(deploy): update image tags to ${{ steps.get-tag.outputs.image_tag }} [skip ci]"
+            git push
+            echo "✅ Pushed deployment updates to Git"
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check-changes.outputs.deploy_app }}" == "true" ]; then
+            echo "✅ **Status**: Deployment manifests updated" >> $GITHUB_STEP_SUMMARY
+            echo "📦 **Image Tag**: ${{ steps.get-tag.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔄 ArgoCD will automatically sync within 3 minutes" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️  **Status**: No app code changes detected - skipping deployment" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️  Only app code changes trigger image builds and deployments" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check ArgoCD UI to verify sync status" >> $GITHUB_STEP_SUMMARY
+          echo "2. Verify pods: \`kubectl get pods -n ${{ env.KUBERNETES_NAMESPACE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Test API: \`curl http://localhost:8000/health\` (after port-forward)" >> $GITHUB_STEP_SUMMARY
+
+          # Also print to console
+          cat $GITHUB_STEP_SUMMARY

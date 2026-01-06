@@ -39,8 +39,8 @@ categorical_encoders: dict[str, LabelEncoder] = {}
 expected_feature_order: list[str] = []
 
 # Model configuration
-MODEL_NAME = "LogisticsDelayModel"
-MODEL_ALIAS = "production"
+MODEL_NAME = os.getenv("MODEL_NAME", "LogisticsDelayModel")  # Read from environment variable
+MODEL_ALIAS = os.getenv("MODEL_ALIAS", "production")  # Read from environment variable
 CATEGORICAL_COLUMNS = ["Shipment_Status", "Traffic_Status", "Logistics_Delay_Reason"]
 
 
@@ -131,7 +131,7 @@ def log_to_db(
 
 
 def load_model() -> None:
-    """Load model from MLflow using the production alias."""
+    """Load model from MLflow using the configured alias."""
     global model, model_uri
 
     try:
@@ -148,8 +148,13 @@ def load_model() -> None:
         os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
         os.environ["AWS_DEFAULT_REGION"] = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
+        # Get model name and alias from environment (allows switching models via ConfigMap)
+        model_name = os.getenv("MODEL_NAME", MODEL_NAME)
+        model_alias = os.getenv("MODEL_ALIAS", MODEL_ALIAS)
+        logger.info(f"Using model name: {model_name}, alias: {model_alias}")
+
         # Load model using MLflow model registry alias
-        model_uri = f"models:/{MODEL_NAME}@{MODEL_ALIAS}"
+        model_uri = f"models:/{model_name}@{model_alias}"
         logger.info(f"Loading model from: {model_uri}")
 
         model = mlflow.pyfunc.load_model(model_uri)
@@ -257,8 +262,9 @@ async def get_model_metadata() -> ModelMetadataResponse:
 
         # Try to find the model version that corresponds to this run
         try:
+            model_name = os.getenv("MODEL_NAME", MODEL_NAME)
             model_versions = mlflow_client.search_model_versions(
-                filter_string=f"name='{MODEL_NAME}'"
+                filter_string=f"name='{model_name}'"
             )
             logger.info(f"Found {len(model_versions)} model versions")
         except Exception as e:
@@ -279,8 +285,9 @@ async def get_model_metadata() -> ModelMetadataResponse:
         metrics = {k: float(v) for k, v in run.data.metrics.items()} if run.data.metrics else {}
         logger.info(f"Extracted {len(parameters)} parameters and {len(metrics)} metrics")
 
+        model_name = os.getenv("MODEL_NAME", MODEL_NAME)
         return ModelMetadataResponse(
-            model_name=MODEL_NAME,
+            model_name=model_name,
             model_version=version,
             run_id=run_id,
             parameters=parameters,

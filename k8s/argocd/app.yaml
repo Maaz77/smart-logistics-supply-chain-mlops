@@ -11,7 +11,7 @@ spec:
   source:
     # GitHub repository for ArgoCD to sync from
     repoURL: https://github.com/Maaz77/smart-logistics-supply-chain-mlops.git
-    targetRevision: main
+    targetRevision: master
     path: k8s/apps
   destination:
     server: https://kubernetes.default.svc

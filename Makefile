@@ -402,6 +402,7 @@ deploy-k8s: ## Deploy applications to Kubernetes cluster
 	@echo "$(GREEN)✓ Namespace ready$(RESET)"
 	@echo ""
 	@echo "$(CYAN)Step 2/2: Applying application manifests...$(RESET)"
+	@kubectl apply -f k8s/apps/model-config.yaml
 	@kubectl apply -f k8s/apps/api-deployment.yaml
 	@kubectl apply -f k8s/apps/ui-deployment.yaml
 	@echo ""

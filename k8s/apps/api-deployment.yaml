@@ -25,6 +25,17 @@ spec:
         - containerPort: 8000
           name: http
         env:
+        # Model configuration - from ConfigMap (allows switching models)
+        - name: MODEL_ALIAS
+          valueFrom:
+            configMapKeyRef:
+              name: model-config
+              key: MODEL_ALIAS
+        - name: MODEL_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: model-config
+              key: MODEL_NAME
         # MLflow configuration - using host.docker.internal to reach Docker Compose services
         - name: MLFLOW_TRACKING_URI
           value: "http://host.docker.internal:5001"

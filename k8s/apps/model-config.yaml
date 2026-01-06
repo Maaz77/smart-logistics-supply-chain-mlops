@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-config
+  namespace: mlops-production
+  labels:
+    app: serving-api
+data:
+  MODEL_ALIAS: "production"  # Change to "experiment" or other alias to switch models
+  MODEL_NAME: "LogisticsDelayModel"

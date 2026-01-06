@@ -1,8 +1,13 @@
 # ============================================
-# MLOps CI Pipeline
+# MLOps CI Pipeline (Continuous Integration)
 # ============================================
 # Single Source of Truth: All commands flow through the Makefile
 # Environment: Poetry (pip-based, reproducible)
+# ============================================
+# This workflow handles:
+# - Quality checks and testing
+# - Infrastructure validation
+# - Docker image building and pushing
 # ============================================
 
 name: MLOps CI
@@ -12,6 +17,13 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      build_images:
+        description: 'Build and push Docker images'
+        required: false
+        type: boolean
+        default: false
 
 env:
   PYTHON_VERSION: "3.12"
@@ -28,6 +40,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for change detection
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
@@ -59,6 +73,26 @@ jobs:
       - name: Run Integration Tests
         run: make test-serving
 
+      # Detect what changed for conditional jobs
+      - name: Detect changes
+        id: changes
+        if: github.event_name == 'push'
+        run: |
+          if [ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]; then
+            # Initial commit, check all files
+            if find src serving -type f -name "*.py" 2>/dev/null | head -1 | grep -q .; then
+              echo "app_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "app_changed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -qE '^(src/|serving/)'; then
+              echo "app_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "app_changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   # ============================================
   # Infrastructure Tests
   # ============================================
@@ -68,8 +102,6 @@ jobs:
     needs: quality
 
     services:
-      # We don't need service containers here because we use docker compose in the steps
-      # But we need basic docker availability
       docker:
         image: docker:dind
 
@@ -93,7 +125,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.0"
-          terraform_wrapper: false # We use tflocal
+          terraform_wrapper: false
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -110,14 +142,9 @@ jobs:
           poetry run awslocal s3 ls
 
           echo "🔍 Checking Service Health..."
-          # LocalStack
           curl -f http://localhost:4566/_localstack/health
-
-          # PostgreSQL
           docker exec mlflow-postgres pg_isready -U mlflow || echo "PostgreSQL check failed"
-
-          # MLflow UI
-          curl -f http://localhost:5001/health || echo "MLflow UI check skipped (might be behind proxy/redirect)"
+          curl -f http://localhost:5001/health || echo "MLflow UI check skipped"
 
           echo "✅ Infrastructure validation complete"
 
@@ -128,3 +155,70 @@ jobs:
       - name: Stop AWS Infrastructure
         if: always()
         run: make infra-down
+
+  # ============================================
+  # Build and Push Docker Images
+  # ============================================
+  build-images:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [quality, infrastructure-test]
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.quality.outputs.app_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.build_images == 'true')
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.short_sha }}
+      api_image: ${{ steps.meta.outputs.docker_username }}/mlops-serving-api:${{ steps.meta.outputs.short_sha }}
+      ui_image: ${{ steps.meta.outputs.docker_username }}/mlops-serving-ui:${{ steps.meta.outputs.short_sha }}
+      commit_sha: ${{ github.sha }}
+      docker_username: ${{ steps.meta.outputs.docker_username }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "docker_username=${{ secrets.DOCKER_USERNAME }}" >> $GITHUB_OUTPUT
+          echo "✅ Generated image tag: $SHORT_SHA"
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./serving/docker/Dockerfile.serving
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/mlops-serving-api:${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push UI image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./serving/docker/Dockerfile.ui
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/mlops-serving-ui:${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output image information
+        run: |
+          echo "✅ Images built and pushed:"
+          echo "  API: ${{ secrets.DOCKER_USERNAME }}/mlops-serving-api:${{ steps.meta.outputs.short_sha }}"
+          echo "  UI: ${{ secrets.DOCKER_USERNAME }}/mlops-serving-ui:${{ steps.meta.outputs.short_sha }}"
