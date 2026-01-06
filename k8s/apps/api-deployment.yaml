@@ -26,16 +26,11 @@ spec:
           name: http
         env:
         # Model configuration - from ConfigMap (allows switching models)
+
         - name: MODEL_ALIAS
-          valueFrom:
-            configMapKeyRef:
-              name: model-config
-              key: MODEL_ALIAS
+          value: "testtest"
         - name: MODEL_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: model-config
-              key: MODEL_NAME
+          value: "LogisticsDelayModel"
         # MLflow configuration - using host.docker.internal to reach Docker Compose services
         - name: MLFLOW_TRACKING_URI
           value: "http://host.docker.internal:5001"
