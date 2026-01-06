@@ -45,7 +45,7 @@ CATEGORICAL_COLUMNS = ["Shipment_Status", "Traffic_Status", "Logistics_Delay_Rea
 logger.info(f"Heeeey there, the model name is: {MODEL_NAME}")
 logger.info(f"Heeeey there, the model alias is: {MODEL_ALIAS}")
 logger.info("I added this line to trigger ci/cd jobs")
-
+logger.info("I have updated the ci to push the most compaible image cross platforms")
 class ModelMetadataResponse(BaseModel):
     """Response model for model metadata endpoint."""
 
