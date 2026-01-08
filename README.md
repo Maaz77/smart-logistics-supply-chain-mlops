@@ -36,6 +36,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - **S3 Buckets** store raw/processed data and MLflow artifacts with bidirectional sync to local folders
 - Enables cloud-native development patterns without AWS costs
 
+![LocalStack AWS Infrastructure](readme_images/LocalStack_AWS.png)
+
 ---
 
 ### 📊 Experiment Tracking & Model Registry
@@ -48,6 +50,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - PostgreSQL backend for experiment metadata
 - Enables model versioning, comparison, and production promotion workflows
 
+![MLflow Experiment Tracking](readme_images/MLFlow.png)
+
 ---
 
 ### 🔄 Workflow Orchestration
@@ -59,6 +63,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - LocalExecutor for sequential task execution
 - Metadata stored in PostgreSQL
 - Enables scheduled and event-driven pipeline execution
+
+![Airflow Workflow Orchestration](readme_images/AirFlow.png)
 
 ---
 
@@ -90,6 +96,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - Time-series visualizations for drift trends
 - Enables proactive model performance monitoring
 
+![Grafana Monitoring Dashboard](readme_images/Grafana.png)
+
 ---
 
 ### 🚀 Model Serving
@@ -108,6 +116,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - User-friendly form-based input
 - Real-time prediction visualization
 - Connects to FastAPI backend for inference
+
+![Model Serving Interface](readme_images/ModelServing.png)
 
 ---
 
@@ -132,6 +142,8 @@ The project uses a **Makefile** as the primary automation tool and single source
 - Automatic synchronization when deployment YAMLs are updated
 - Self-healing capabilities to maintain desired state
 - Enables declarative infrastructure management
+
+![ArgoCD GitOps Deployment](readme_images/ArgoCD.png)
 
 ---
 
@@ -324,5 +336,7 @@ Unified PostgreSQL container hosts **four databases**:
 - **serving**: API request logs (`serving_logs` table)
 
 All databases persist in `mlops_services/postgres_data/`.
+
+![Database Architecture](readme_images/Databas.png)
 
 ---
