@@ -17,8 +17,8 @@
 
 .PHONY: help setup clean fix-style type-check test test-serving \
         infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
-        pipeline grafana-up grafana-down monitoring serving serving-down \
-        setup-k8s build-push deploy-k8s down-k8s argocd-password
+        pipeline grafana-up grafana-down monitoring \
+        setup-k8s down-k8s argocd-password
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
@@ -31,8 +31,6 @@ COMPOSE_SERVING := docker compose -f serving/docker/docker-compose.serving.yaml
 TF := cd infra_aws/terraform && $(POETRY) run tflocal
 # LocalStack AWS CLI - uses awslocal via Poetry
 AWS_LOCAL := $(POETRY) run awslocal
-# Docker Hub username for Kubernetes deployments (set via env var: DOCKER_USER=myuser)
-DOCKER_USER ?= placeholder_user
 
 # --- Colors ---
 CYAN := \033[36m
@@ -62,14 +60,12 @@ help: ## Show this help message
 	@echo "$(YELLOW)Monitoring:$(RESET)"
 	@grep -E '^(grafana-up|grafana-down|monitoring):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(YELLOW)ML Pipeline:$(RESET)"
+	@echo "$(YELLOW)Run ML Pipeline on your bare local machine:$(RESET)"
 	@grep -E '^(pipeline):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(YELLOW)Model Serving:$(RESET)"
-	@grep -E '^(serving|serving-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(YELLOW)Kubernetes:$(RESET)"
-	@grep -E '^(setup-k8s|build-push|deploy-k8s|down-k8s|argocd-password):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@echo "$(YELLOW)Model Serving Deployed on Kubernetes:$(RESET)"
+	@grep -E '^(setup-k8s|down-k8s|argocd-password):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 
 
@@ -250,7 +246,7 @@ s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
 	@$(POETRY) run python infra_aws/scripts/s3_sync.py
 
 # --- 📊 Monitoring ---
-grafana-up: ## Start Grafana services (initializes database and starts Grafana)
+grafana-up: ## Start Grafana service container
 	@echo "$(CYAN)📊 Starting Grafana services...$(RESET)"
 	@echo "$(YELLOW)  Prerequisites:$(RESET)"
 	@echo "    • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
@@ -262,7 +258,6 @@ grafana-up: ## Start Grafana services (initializes database and starts Grafana)
 	@echo ""
 	@echo "$(GREEN)✓ Grafana services ready!$(RESET)"
 	@echo "  • Grafana:  http://localhost:3000 (Login: admin/admin)"
-	@echo "  • Adminer:  http://localhost:8081 (from ml-services)"
 
 grafana-down: ## Stop Grafana services - does not affect MLflow/PostgreSQL
 	@echo "$(CYAN)🛑 Stopping Grafana services...$(RESET)"
@@ -270,7 +265,7 @@ grafana-down: ## Stop Grafana services - does not affect MLflow/PostgreSQL
 	@$(COMPOSE_MONITORING) rm -f grafana
 	@echo "$(GREEN)✓ Grafana services stopped (MLOps services still running)$(RESET)"
 
-monitoring: ## Run model monitoring simulation (calculates Evidently metrics day-by-day and logs to database)
+monitoring: ## Run model monitoring simulation (calculates some Evidently metrics day-by-day and logs to monitoring database)
 	@echo "$(BOLD)$(CYAN)📊 Running Model Monitoring Simulation$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Prerequisites:$(RESET)"
@@ -292,7 +287,7 @@ monitoring: ## Run model monitoring simulation (calculates Evidently metrics day
 	@echo ""
 
 # ---  ML Pipeline ---
-pipeline: ## Run the full ML pipeline on your local machine using MLOps services and AWS infrastructure (ingest → preprocess → train)
+pipeline: ## Run the ML Pipeline on your bare local machine using MLFlow service and AWS S3 buckets for data and model storage
 	@echo "$(BOLD)$(CYAN)🚀 Running ML Pipeline$(RESET)"
 	@echo ""
 	@echo "$(CYAN)Step 1/3: Data Ingestion$(RESET)"
@@ -313,31 +308,6 @@ pipeline: ## Run the full ML pipeline on your local machine using MLOps services
 	@echo "  • S3 data:     $(CYAN)poetry run awslocal s3 ls s3://smart-logistics-data/ --recursive$(RESET)"
 	@echo ""
 
-# --- 🚀 Model Serving ---
-serving: ## Start model serving services (FastAPI + Streamlit UI)
-	@echo "$(BOLD)$(CYAN)🚀 Starting Model Serving Services$(RESET)"
-	@echo ""
-	@echo "$(YELLOW)Prerequisites:$(RESET)"
-	@echo "  • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
-	@echo "  • MLOps services must be running: $(CYAN)make ml-services-up$(RESET)"
-	@echo ""
-	@echo "$(CYAN)Building and starting serving containers...$(RESET)"
-	@$(COMPOSE_SERVING) build
-	@$(COMPOSE_SERVING) up -d
-	@echo ""
-	@echo "$(GREEN)✓ Model serving services ready!$(RESET)"
-	@echo "  • FastAPI API:  http://localhost:8000"
-	@echo "  • API Docs:     http://localhost:8000/docs"
-	@echo "  • Streamlit UI: http://localhost:8501"
-	@echo ""
-	@echo "$(YELLOW)Note:$(RESET) Ensure a model is registered in MLflow with the 'production' alias:"
-	@echo "  $(CYAN)models:/LogisticsDelayModel@production$(RESET)"
-
-serving-down: ## Stop model serving services (FastAPI + Streamlit UI)
-	@echo "$(CYAN)🛑 Stopping model serving services...$(RESET)"
-	@$(COMPOSE_SERVING) down
-	@echo "$(GREEN)✓ Model serving services stopped$(RESET)"
-
 # --- ☸️  Kubernetes ---
 setup-k8s: ## Setup Kubernetes cluster (Kind) and install ArgoCD
 	@echo "$(BOLD)$(CYAN)☸️  Setting up Kubernetes Infrastructure$(RESET)"
@@ -347,84 +317,29 @@ setup-k8s: ## Setup Kubernetes cluster (Kind) and install ArgoCD
 		exit 1; \
 	fi
 	@sh k8s/setup_k8s.sh
-
-build-push: ## Build and push Docker images to Docker Hub (prompts for DOCKER_USER if not provided)
-	@DOCKER_USER_VAR="$(DOCKER_USER)"; \
-	if [ -z "$$DOCKER_USER_VAR" ] || [ "$$DOCKER_USER_VAR" = "placeholder_user" ]; then \
-		echo "$(YELLOW)⚠ DOCKER_USER not provided$(RESET)"; \
-		echo ""; \
-		read -p "Enter your Docker Hub username: " DOCKER_USER_VAR; \
-		if [ -z "$$DOCKER_USER_VAR" ]; then \
-			echo "$(RED)✗ DOCKER_USER cannot be empty$(RESET)"; \
-			exit 1; \
-		fi; \
-	fi; \
-	echo "$(BOLD)$(CYAN)🐳 Building and pushing Docker images$(RESET)"; \
-	echo "$(CYAN)Using Docker Hub username: $(YELLOW)$$DOCKER_USER_VAR$(RESET)"; \
-	echo ""; \
-	echo "$(CYAN)Building API image...$(RESET)"; \
-	docker build -f serving/docker/Dockerfile.serving -t $$DOCKER_USER_VAR/mlops-serving-api:latest .; \
-	echo "$(GREEN)✓ API image built$(RESET)"; \
-	echo ""; \
-	echo "$(CYAN)Building UI image...$(RESET)"; \
-	docker build -f serving/docker/Dockerfile.ui -t $$DOCKER_USER_VAR/mlops-serving-ui:latest .; \
-	echo "$(GREEN)✓ UI image built$(RESET)"; \
-	echo ""; \
-	echo "$(CYAN)Pushing images to Docker Hub...$(RESET)"; \
-	docker push $$DOCKER_USER_VAR/mlops-serving-api:latest; \
-	docker push $$DOCKER_USER_VAR/mlops-serving-ui:latest; \
-	echo ""; \
-	echo "$(GREEN)✓ Images pushed successfully!$(RESET)"; \
-	echo ""; \
-	echo "$(YELLOW)Next steps:$(RESET)"; \
-	echo "  1. Update image names in $(CYAN)k8s/apps/*.yaml$(RESET) (replace 'placeholder_user' with '$$DOCKER_USER_VAR')"; \
-	echo "  2. Deploy to cluster: $(CYAN)make deploy-k8s$(RESET)"; \
-	echo ""; \
-	echo "$(YELLOW)Note:$(RESET) Make sure you've run $(CYAN)make setup-k8s$(RESET) first!"
-
-deploy-k8s: ## Deploy applications to Kubernetes cluster
-	@echo "$(BOLD)$(CYAN)☸️  Deploying to Kubernetes$(RESET)"
 	@echo ""
-	@if ! kubectl cluster-info &> /dev/null; then \
-		echo "$(RED)✗ Kubernetes cluster not accessible$(RESET)"; \
-		echo "  Run: $(CYAN)make setup-k8s$(RESET) first"; \
-		exit 1; \
-	fi
-	@echo "$(CYAN)Step 1/2: Creating namespace...$(RESET)"
-	@kubectl apply -f k8s/apps/namespace.yaml
-	@echo "$(CYAN)Waiting for namespace to be ready...$(RESET)"
-	@kubectl wait --for=condition=Active namespace/mlops-production --timeout=30s 2>/dev/null || sleep 2
-	@echo "$(GREEN)✓ Namespace ready$(RESET)"
+	@echo "$(GREEN)✓ Kubernetes setup complete!$(RESET)"
 	@echo ""
-	@echo "$(CYAN)Step 2/2: Applying application manifests...$(RESET)"
-	@if [ -z "$(DOCKER_USER)" ] || [ "$(DOCKER_USER)" = "placeholder_user" ]; then \
-		echo "$(RED)✗ DOCKER_USER not set$(RESET)"; \
-		echo "  Set it via: $(CYAN)export DOCKER_USER=your_dockerhub_username$(RESET)"; \
-		echo "  Or pass it: $(CYAN)make deploy-k8s DOCKER_USER=your_dockerhub_username$(RESET)"; \
-		exit 1; \
-	fi
-	@echo "$(CYAN)  Using Docker Hub username: $(YELLOW)$(DOCKER_USER)$(RESET)"
-	@kubectl apply -f k8s/apps/model-config.yaml
-	@# Substitute DOCKER_USER in deployment YAMLs before applying
-	@export DOCKER_USER=$(DOCKER_USER); \
-	if command -v envsubst >/dev/null 2>&1; then \
-		envsubst < k8s/apps/api-deployment.yaml | kubectl apply -f -; \
-		envsubst < k8s/apps/ui-deployment.yaml | kubectl apply -f -; \
+	@echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "$(BOLD)$(CYAN)📡 Access Hints$(RESET)"
+	@echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo ""
+	@echo "$(CYAN)ArgoCD UI:$(RESET)"
+	@PASSWORD=$$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d 2>/dev/null 2>/dev/null || echo ""); \
+	if [ -n "$$PASSWORD" ]; then \
+		echo "  Password: $(BOLD)$$PASSWORD$(RESET) (username: $(BOLD)admin$(RESET))"; \
 	else \
-		echo "$(YELLOW)⚠ envsubst not found, using sed fallback$(RESET)"; \
-		sed "s|\$${DOCKER_USER}|$(DOCKER_USER)|g" k8s/apps/api-deployment.yaml | kubectl apply -f -; \
-		sed "s|\$${DOCKER_USER}|$(DOCKER_USER)|g" k8s/apps/ui-deployment.yaml | kubectl apply -f -; \
-	fi
+		echo "  Password: $(YELLOW)Run 'make argocd-password' to get it$(RESET)"; \
+	fi; \
+	echo "  Port forward: $(BOLD)kubectl port-forward svc/argocd-server -n argocd 8088:443$(RESET)"; \
+	echo "  URL: $(BOLD)https://localhost:8088$(RESET)"
 	@echo ""
-	@echo "$(GREEN)✓ Deployment complete!$(RESET)"
+	@echo "$(CYAN)Application UI:$(RESET)"
+	@echo "  Port forward: $(BOLD)kubectl port-forward svc/serving-ui-service -n mlops-production 8501:8501$(RESET)"
+	@echo "  URL: $(BOLD)http://localhost:8501$(RESET)"
 	@echo ""
-	@echo "$(YELLOW)Check status:$(RESET)"
-	@echo "  • Pods: $(CYAN)kubectl get pods -n mlops-production$(RESET)"
-	@echo "  • Services: $(CYAN)kubectl get svc -n mlops-production$(RESET)"
-	@echo ""
-	@echo "$(YELLOW)Port forwarding:$(RESET)"
-	@echo "  • API: $(CYAN)kubectl port-forward svc/serving-api-service -n mlops-production 8002:8000$(RESET)"
-	@echo "  • UI: $(CYAN)kubectl port-forward svc/serving-ui-service -n mlops-production 8501:8501$(RESET)"
+	@echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+
 
 down-k8s: ## Shut down Kind Kubernetes cluster (deletes cluster and all resources including ArgoCD)
 	@echo "$(BOLD)$(CYAN)🛑 Shutting down Kind Kubernetes cluster$(RESET)"
@@ -463,7 +378,20 @@ argocd-password: ## Print ArgoCD UI admin password
 	echo "$(GREEN)Username:$(RESET) $(BOLD)admin$(RESET)"; \
 	echo "$(GREEN)Password:$(RESET) $(BOLD)$$PASSWORD$(RESET)"; \
 	echo ""; \
-	echo "$(YELLOW)Access ArgoCD:$(RESET)"; \
-	echo "  1. Port forward: $(CYAN)kubectl port-forward svc/argocd-server -n argocd 8088:443$(RESET)"; \
-	echo "  2. Open browser: $(CYAN)https://localhost:8088$(RESET)"; \
-	echo "  3. Login with the credentials above"
+	echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	echo "$(BOLD)$(CYAN)📡 How to Access ArgoCD UI:$(RESET)"; \
+	echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	echo ""; \
+	echo "  $(CYAN)Step 1:$(RESET) Start port forwarding (run in a separate terminal):"; \
+	echo "    $(BOLD)kubectl port-forward svc/argocd-server -n argocd 8088:443$(RESET)"; \
+	echo ""; \
+	echo "  $(CYAN)Step 2:$(RESET) Open your browser and navigate to:"; \
+	echo "    $(BOLD)https://localhost:8088$(RESET)"; \
+	echo ""; \
+	echo "  $(CYAN)Step 3:$(RESET) Accept the SSL certificate warning (self-signed cert)"; \
+	echo ""; \
+	echo "  $(CYAN)Step 4:$(RESET) Login with the credentials shown above"; \
+	echo ""; \
+	echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	echo ""; \
+	echo "$(YELLOW)ℹ Note:$(RESET) ArgoCD automatically syncs deployments from git. No manual deployment needed!"
