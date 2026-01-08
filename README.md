@@ -72,7 +72,6 @@ python src/your_script.py
 | `make s3-sync` | Manual bidirectional sync (Local ↔ S3) |
 | `make clean` | Clean Python caches (Safe: keeps infra state) |
 | `make reset-infra` | **Destructive**: Delete all LocalStack & Terraform state |
-| `make init-db` | Initialize monitoring database in mlflow-postgres |
 | `make monitoring` | Start monitoring services (Grafana + Adminer) |
 | `make monitoring-down` | Stop monitoring services |
 
@@ -81,7 +80,7 @@ python src/your_script.py
 | Service | URL | Purpose |
 |---------|-----|---------|
 | LocalStack | http://localhost:4566 | AWS emulation (S3, IAM) |
-| PostgreSQL | localhost:5432 | MLflow backend store |
+| PostgreSQL | localhost:5432 | Unified database for MLflow, Airflow, Monitoring, and Serving |
 | MLflow UI | http://localhost:5001 | Experiment tracking |
 | Airflow UI | http://localhost:8080 | Workflow orchestration |
 | Grafana | http://localhost:3000 | Monitoring dashboards (optional) |
@@ -89,7 +88,7 @@ python src/your_script.py
 
 ## 📊 Monitoring
 
-The project includes optional monitoring infrastructure using **Grafana** (for dashboards) and **Adminer** (for database administration). These services use the existing `mlflow-postgres` container and create a separate `monitoring` database for Evidently metrics.
+The project includes optional monitoring infrastructure using **Grafana** (for dashboards) and **Adminer** (for database administration). These services use the unified `mlops-postgres` container and connect to the `monitoring` database for Evidently metrics.
 
 ### Setup Monitoring
 
@@ -97,8 +96,8 @@ The project includes optional monitoring infrastructure using **Grafana** (for d
 # 1. Ensure infrastructure is running
 make infra-up
 
-# 2. Initialize the monitoring database
-make init-db
+# 2. Ensure MLOps services are running (creates monitoring database automatically)
+make ml-services-up
 
 # 3. Start monitoring services
 make monitoring
@@ -113,10 +112,10 @@ make monitoring
 
 - **Adminer**: http://localhost:8081
   - System: `PostgreSQL`
-  - Server: `mlflow-postgres`
-  - Username: `mlflow` (or value from `POSTGRES_USER` env var)
-  - Password: `mlflow` (or value from `POSTGRES_PASSWORD` env var)
-  - Database: `monitoring` (or `mlflow` for MLflow data)
+  - Server: `postgres` (or `localhost:5432` from host)
+  - Username: `MLOps_Full_Postgres` (or value from `POSTGRES_USER` env var)
+  - Password: `MLOps_Full_Postgres` (or value from `POSTGRES_PASSWORD` env var)
+  - Database: `monitoring` (or `mlflow` for MLflow data, `airflow` for Airflow metadata, `serving` for serving logs)
 
 ### Stop Monitoring
 
@@ -124,7 +123,7 @@ make monitoring
 make monitoring-down
 ```
 
-**Note**: The monitoring database persists in the `mlflow-postgres` container. To remove it, you would need to manually drop it via Adminer or `psql`.
+**Note**: The monitoring database persists in the unified `mlops-postgres` container alongside the `mlflow` and `airflow` databases. To remove it, you would need to manually drop it via Adminer or `psql`.
 
 ## 💾 Persistent Storage (S3 Buckets & Local Folders)
 
@@ -137,14 +136,14 @@ The infrastructure uses LocalStack to simulate AWS S3 buckets. Data is synced bi
 
 | Local Folder | Purpose |
 |--------------|---------|
-| `./mlflow_db/` | PostgreSQL data (MLflow experiments) |
+| `./mlops_services/postgres_data/` | PostgreSQL data (mlflow, airflow, monitoring, serving databases) |
 
 **How it works:**
 - On `make infra-up`: Starts Docker services (LocalStack, PostgreSQL, MLflow)
 - On `make infra-init`: **Terraform creates S3 buckets** and syncs local folders **to** S3
 - On `make s3-sync`: Manual bidirectional sync between local folders and S3
 - On `make infra-down`: Final sync from S3 **to** local before shutdown
-- After shutdown: `data/`, `models/`, `mlflow_db/` persist on disk
+- After shutdown: `data/`, `models/`, `mlops_services/postgres_data/` persist on disk
 
 ## 📁 Project Structure
 
@@ -159,7 +158,8 @@ Smart-Logistics-Supply-Chain-ML/
 │   └── utils/              # Shared utilities
 ├── data/                   # 📦 Synced with s3://smart-logistics-data
 ├── models/                 # 📦 Synced with s3://mlflow-model-registry
-├── mlflow_db/              # 📦 PostgreSQL data persistence
+├── mlops_services/
+│   └── postgres_data/      # 📦 PostgreSQL data persistence (mlflow, airflow, monitoring, serving)
 ├── deployment/docker/      # Docker Compose (infrastructure only)
 ├── infrastructure/terraform/ # IaC for LocalStack
 ├── config/grafana/        # Grafana provisioning configs
@@ -220,8 +220,8 @@ S3_MODEL_REGISTRY_BUCKET=mlflow-model-registry
 # PostgreSQL
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_USER=mlflow
-POSTGRES_PASSWORD=mlflow
+POSTGRES_USER=MLOps_Full_Postgres
+POSTGRES_PASSWORD=MLOps_Full_Postgres
 POSTGRES_DB=mlflow
 
 # MLflow

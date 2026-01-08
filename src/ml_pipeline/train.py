@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Constants
 S3_PROCESSED_PREFIX = "processed"
-MODEL_NAME = "LogisticsDelayModel"
-EXPERIMENT_NAME = "logistics-delay-prediction"
+MODEL_NAME = "Logistics-Delay-Model"
+EXPERIMENT_NAME = "logistics-delay-prediction-experiments"
 TARGET_COLUMN = "Logistics_Delay"
 
 # Training settings

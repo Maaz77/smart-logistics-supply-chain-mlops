@@ -1,17 +1,18 @@
 # ============================================
 # Docker Compose - Monitoring Services
 # ============================================
-# Optional monitoring infrastructure: Grafana + Adminer
+# Optional monitoring infrastructure: Grafana
 # Usage: docker compose -f docker-compose.yaml -f docker-compose.monitoring.yaml up -d
 # ============================================
 #
 # Prerequisites:
 #   - Main infrastructure must be running (make infra-up)
-#   - Monitoring database must be initialized (make init-db)
+#   - MLOps services must be running (make ml-services-up)
+#   - Note: Monitoring database is created automatically by PostgreSQL init script
 #
 # Services:
 #   - Grafana: Dashboards and visualization (port 3000)
-#   - Adminer: Database administration UI (port 8081)
+#   - Note: Adminer is now in mlops_services/docker/docker-compose.yaml
 # ============================================
 
 services:
@@ -27,56 +28,19 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_INSTALL_PLUGINS=
-      - POSTGRES_USER=${POSTGRES_USER:-mlflow}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mlflow}
-      - POSTGRES_HOST=mlflow-postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DATABASE=monitoring
-      # Ensure Grafana waits for network to be ready
+      # Grafana uses SQLite for its own storage
       - GF_DATABASE_TYPE=sqlite3
       - GF_DATABASE_PATH=/var/lib/grafana/grafana.db
+      # PostgreSQL connection is configured via datasource provisioning
+      # See: monitoring/grafana/provisioning/datasources/datasources.yml
     volumes:
       # Persistent Grafana data (dashboards, users, etc.)
       # Path is relative to project root (since compose uses mlops_services/docker first)
       - ../../monitoring/grafana_db:/var/lib/grafana
       # Grafana provisioning configuration (datasources, dashboards, etc.)
       - ../../monitoring/grafana/provisioning:/etc/grafana/provisioning
-    command:
-      - sh
-      - -c
-      - |
-        # Wait for PostgreSQL to be accessible (simple TCP connection test)
-        echo "Waiting for PostgreSQL at $${POSTGRES_HOST}:$${POSTGRES_PORT}..."
-        for i in $$(seq 1 30); do
-          if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$${POSTGRES_HOST}/$${POSTGRES_PORT}" 2>/dev/null; then
-            echo "PostgreSQL is ready!"
-            break
-          fi
-          echo "Attempt $$i/30: PostgreSQL not ready yet, waiting..."
-          sleep 2
-        done
-
-        # Verify datasource config file exists
-        if [ -f /etc/grafana/provisioning/datasources/datasources.yml ]; then
-          echo "✓ Datasource configuration file found"
-          echo "  File: /etc/grafana/provisioning/datasources/datasources.yml"
-          echo ""
-        else
-          echo "⚠ Warning: Datasource configuration file not found!"
-          echo "  Expected: /etc/grafana/provisioning/datasources/datasources.yml"
-          echo ""
-        fi
-
-        # Test connectivity to PostgreSQL
-        echo "Testing PostgreSQL connectivity..."
-        if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$${POSTGRES_HOST}/$${POSTGRES_PORT}" 2>/dev/null; then
-          echo "✓ PostgreSQL is reachable from Grafana container"
-        else
-          echo "⚠ Warning: Cannot reach PostgreSQL at $${POSTGRES_HOST}:$${POSTGRES_PORT}"
-          echo "  Make sure both containers are on the same Docker network"
-        fi
-
-        exec /run.sh
+    # Grafana will automatically connect to PostgreSQL using the datasource configuration
+    # No need for manual connectivity checks - Grafana handles this internally
     networks:
       - mlops_network
     healthcheck:
@@ -85,33 +49,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-  # ============================================
-  # Adminer - Database Administration UI
-  # ============================================
-  adminer:
-    image: adminer
-    container_name: adminer
-    ports:
-      - "8081:8080"
-    networks:
-      - mlops_network
-    environment:
-      - ADMINER_DEFAULT_SERVER=mlflow-postgres
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-# ============================================
-# Volumes
-# ============================================
-volumes:
-  grafana_data:
-    name: grafana_data
-    driver: local
 
 # ============================================
 # Networks - Join existing mlops_network

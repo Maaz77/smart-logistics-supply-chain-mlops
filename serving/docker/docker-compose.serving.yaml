@@ -30,9 +30,9 @@ services:
       # PostgreSQL connection (for serving_logs)
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_USER: mlflow
-      POSTGRES_PASSWORD: mlflow
-      POSTGRES_DB: monitoring
+      POSTGRES_USER: MLOps_Full_Postgres
+      POSTGRES_PASSWORD: MLOps_Full_Postgres
+      POSTGRES_DB: serving
     # Note: postgres and mlflow are in mlops_services compose file
     # They share the same mlops_network, so communication works by service name
     # Healthcheck will wait for dependencies to be ready

@@ -178,7 +178,7 @@ reset-infra: ## ⚠️  Wipe all infrastructure state (Terraform, LocalStack)
 	rm -f infra_aws/terraform/tfplan
 	rm -f infra_aws/terraform/.terraform.lock.hcl
 	@echo "$(GREEN)✓ Reset: Infrastructure state cleared$(RESET)"
-	@echo "$(YELLOW)ℹ Note: Persistent folders (data/, models/, mlflow_db/) were NOT deleted.$(RESET)"
+	@echo "$(YELLOW)ℹ Note: Persistent folders (data/, models/, mlops_services/postgres_data/) were NOT deleted.$(RESET)"
 
 # --- 🏗️ Infrastructure ---
 infra-up: ## Start AWS infrastructure (LocalStack, Terraform, S3 sync)
@@ -211,22 +211,24 @@ infra-up: ## Start AWS infrastructure (LocalStack, Terraform, S3 sync)
 ml-services-up: ## Start MLOps services (Postgres, MLflow, Airflow)
 	@echo "$(CYAN)🏗️ Starting MLOps services...$(RESET)"
 	@echo "$(CYAN)  Creating persistent folders if needed...$(RESET)"
-	@mkdir -p mlops_services/mlflow_db mlops_services/airflow_db
+	@mkdir -p mlops_services/postgres_data
 	@echo "$(CYAN)  Starting MLOps services (Postgres, MLflow)...$(RESET)"
 	@$(COMPOSE_MLOPS) up -d --wait
 	@echo ""
 	@echo "$(BOLD)$(CYAN)🌀 Starting Airflow...$(RESET)"
-	@$(COMPOSE_AIRFLOW) build
-	@$(COMPOSE_AIRFLOW) up -d
+	@echo "$(CYAN)  Building Airflow images...$(RESET)"
+	@$(COMPOSE_MLOPS) -f mlops_services/docker/docker-compose.airflow.yaml build
+	@echo "$(CYAN)  Starting Airflow services...$(RESET)"
+	@$(COMPOSE_MLOPS) -f mlops_services/docker/docker-compose.airflow.yaml up -d --wait
 	@echo ""
 	@echo "$(GREEN)✓ MLOps services ready!$(RESET)"
 	@echo "  • PostgreSQL:  localhost:5432"
 	@echo "  • MLflow UI:   http://localhost:5001"
 	@echo "  • Airflow UI:  http://localhost:8080 (Login: admin/admin)"
+	@echo "  • Adminer:     http://localhost:8081"
 	@echo ""
 	@echo "$(YELLOW)Persistent storage:$(RESET)"
-	@echo "  • PostgreSQL data            → ./mlops_services/mlflow_db"
-	@echo "  • Airflow data               → ./mlops_services/airflow_db"
+	@echo "  • PostgreSQL data (mlflow, airflow, monitoring, serving) → ./mlops_services/postgres_data"
 
 infra-down: ## Stop AWS infrastructure (syncs S3 to local first)
 	@echo "$(CYAN)🔄 Syncing S3 buckets to local folders...$(RESET)"
@@ -238,38 +240,35 @@ infra-down: ## Stop AWS infrastructure (syncs S3 to local first)
 
 ml-services-down: ## Stop MLOps services (Postgres, MLflow, Airflow)
 	@echo "$(CYAN)🛑 Stopping Airflow...$(RESET)"
-	@$(COMPOSE_AIRFLOW) down
+	@$(COMPOSE_MLOPS) -f mlops_services/docker/docker-compose.airflow.yaml down
 	@echo "$(CYAN)🛑 Stopping MLOps services...$(RESET)"
 	@$(COMPOSE_MLOPS) down
 	@echo "$(GREEN)✓ MLOps services stopped$(RESET)"
-	@echo "$(YELLOW)ℹ Persistent data preserved in: mlops_services/mlflow_db/, mlops_services/airflow_db/$(RESET)"
+	@echo "$(YELLOW)ℹ Persistent data preserved in: mlops_services/postgres_data/$(RESET)"
 
 s3-sync: ## Sync S3 buckets with local folders (bidirectional via LocalStack)
 	@$(POETRY) run python infra_aws/scripts/s3_sync.py
 
 # --- 📊 Monitoring ---
-grafana-up: ## Start Grafana services (initializes database and starts Grafana + Adminer)
+grafana-up: ## Start Grafana services (initializes database and starts Grafana)
 	@echo "$(CYAN)📊 Starting Grafana services...$(RESET)"
 	@echo "$(YELLOW)  Prerequisites:$(RESET)"
 	@echo "    • Infrastructure must be running: $(CYAN)make infra-up$(RESET)"
 	@echo "    • MLOps services must be running: $(CYAN)make ml-services-up$(RESET)"
+	@echo "    • Note: Monitoring database is created automatically by PostgreSQL init script"
 	@echo ""
-	@echo "$(CYAN)  Initializing monitoring database...$(RESET)"
-	@./monitoring/scripts/init_monitoring_db.sh
-	@echo "$(GREEN)✓ Monitoring database ready$(RESET)"
-	@echo ""
-	@echo "$(CYAN)  Starting Grafana and Adminer...$(RESET)"
-	@$(COMPOSE_MONITORING) up -d --wait grafana adminer
+	@echo "$(CYAN)  Starting Grafana...$(RESET)"
+	@$(COMPOSE_MONITORING) up -d --wait grafana
 	@echo ""
 	@echo "$(GREEN)✓ Grafana services ready!$(RESET)"
 	@echo "  • Grafana:  http://localhost:3000 (Login: admin/admin)"
-	@echo "  • Adminer:  http://localhost:8081"
+	@echo "  • Adminer:  http://localhost:8081 (from ml-services)"
 
-grafana-down: ## Stop Grafana services (Grafana + Adminer) - does not affect MLflow/PostgreSQL
+grafana-down: ## Stop Grafana services - does not affect MLflow/PostgreSQL
 	@echo "$(CYAN)🛑 Stopping Grafana services...$(RESET)"
-	@$(COMPOSE_MONITORING) stop grafana adminer
-	@$(COMPOSE_MONITORING) rm -f grafana adminer
-	@echo "$(GREEN)✓ Grafana services stopped (MLflow/PostgreSQL still running)$(RESET)"
+	@$(COMPOSE_MONITORING) stop grafana
+	@$(COMPOSE_MONITORING) rm -f grafana
+	@echo "$(GREEN)✓ Grafana services stopped (MLOps services still running)$(RESET)"
 
 monitoring: ## Run model monitoring simulation (calculates Evidently metrics day-by-day and logs to database)
 	@echo "$(BOLD)$(CYAN)📊 Running Model Monitoring Simulation$(RESET)"

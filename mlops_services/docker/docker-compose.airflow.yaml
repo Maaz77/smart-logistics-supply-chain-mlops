@@ -33,8 +33,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
 
-    # Database connection (Airflow's own Postgres)
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+    # Database connection (Shared PostgreSQL container)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-MLOps_Full_Postgres}:${POSTGRES_PASSWORD:-MLOps_Full_Postgres}@postgres:5432/airflow
 
     # Webserver config
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
@@ -63,33 +63,12 @@ x-airflow-common: &airflow-common
     - ../../src:/opt/airflow/src
     - airflow-logs:/opt/airflow/logs
   depends_on:
-    airflow-db:
+    postgres:
       condition: service_healthy
   networks:
-    - default
+    - mlops_network
 
 services:
-  # ============================================
-  # PostgreSQL - Airflow Metadata Store
-  # ============================================
-  airflow-db:
-    image: postgres:15-alpine
-    container_name: airflow-postgres
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - ../airflow_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - default
-
   # ============================================
   # Airflow Init - Database & Admin User Setup
   # ============================================
@@ -139,7 +118,7 @@ services:
     container_name: airflow-scheduler
     command: scheduler
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/localhost/8793' 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -158,7 +137,9 @@ volumes:
 # ============================================
 # Networks - Join existing mlops_network
 # ============================================
+# Note: PostgreSQL container is defined in docker-compose.yaml
+# Airflow services depend on the shared 'postgres' service
 networks:
-  default:
-    external: true
+  mlops_network:
     name: mlops_network
+    external: true

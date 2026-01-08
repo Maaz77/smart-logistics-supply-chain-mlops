@@ -8,7 +8,7 @@
 # Persistent Storage Design:
 # - data/           → synced with s3://smart-logistics-data
 # - models/         → synced with s3://mlflow-model-registry (MLflow artifacts)
-# - mlflow_db/      → PostgreSQL data for MLflow experiments
+# - postgres_data/  → PostgreSQL data for all services (mlflow, airflow, monitoring, serving)
 #
 # These folders persist after infrastructure is shut down.
 #
@@ -18,22 +18,29 @@
 
 services:
   # ============================================
-  # PostgreSQL - MLflow Backend Store
+  # PostgreSQL - Unified Database for All Services
+  # ============================================
+  # Single PostgreSQL container hosting multiple databases:
+  # - mlflow: MLflow experiment tracking
+  # - airflow: Airflow metadata store
+  # - monitoring: Monitoring metrics (Evidently)
   # ============================================
   postgres:
     image: postgres:15-alpine
-    container_name: mlflow-postgres
+    container_name: mlops-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
-      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+      POSTGRES_USER: ${POSTGRES_USER:-MLOps_Full_Postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-MLOps_Full_Postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}  # Default database, others created via init script
     ports:
       - "5432:5432"
     volumes:
       # Persist PostgreSQL data in mlops_services folder
-      - "../mlflow_db:/var/lib/postgresql/data"
+      - "../postgres_data:/var/lib/postgresql/data"
+      # Init script to create all databases
+      - "./init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlflow} -d ${POSTGRES_DB:-mlflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-MLOps_Full_Postgres} -d ${POSTGRES_DB:-mlflow}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -56,7 +63,7 @@ services:
       - "5001:5000"  # External 5001 -> Internal 5000 (avoids macOS AirPlay conflict)
     environment:
       # MLflow backend store configuration (Postgres)
-      MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER:-MLOps_Full_Postgres}:${POSTGRES_PASSWORD:-MLOps_Full_Postgres}@postgres:5432/mlflow
       # MLflow artifact store configuration (S3 via LocalStack - model registry bucket)
       MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://mlflow-model-registry
       # S3 endpoint for LocalStack (container-to-container communication)
@@ -70,14 +77,41 @@ services:
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      --backend-store-uri postgresql://${POSTGRES_USER:-MLOps_Full_Postgres}:${POSTGRES_PASSWORD:-MLOps_Full_Postgres}@postgres:5432/mlflow
       --default-artifact-root s3://mlflow-model-registry"
     networks:
       - mlops_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ============================================
+  # Adminer - Database Administration UI
+  # ============================================
+  adminer:
+    image: adminer
+    container_name: adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - mlops_network
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 # ============================================
 # Networks - Join existing mlops_network
 # ============================================
+# Network is created by infra_aws/docker/docker-compose.yaml
+# If network doesn't exist, run: make infra-up first
 networks:
   mlops_network:
     external: true

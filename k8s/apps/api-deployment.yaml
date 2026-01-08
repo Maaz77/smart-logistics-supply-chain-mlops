@@ -30,7 +30,7 @@ spec:
         - name: MODEL_ALIAS
           value: "production"
         - name: MODEL_NAME
-          value: "LogisticsDelayModel"
+          value: "Logistics-Delay-Model"
         # MLflow configuration - using host.docker.internal to reach Docker Compose services
         - name: MLFLOW_TRACKING_URI
           value: "http://host.docker.internal:5001"
@@ -49,11 +49,11 @@ spec:
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_USER
-          value: "mlflow"
+          value: "MLOps_Full_Postgres"
         - name: POSTGRES_PASSWORD
-          value: "mlflow"
+          value: "MLOps_Full_Postgres"
         - name: POSTGRES_DB
-          value: "monitoring"
+          value: "serving"
         resources:
           requests:
             memory: "256Mi"

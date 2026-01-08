@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 S3_PROCESSED_PREFIX = "processed"
 MONITORING_DB = "monitoring"
 MONITORING_TABLE = "monitoring_metrics"
-PAUSE_SECONDS = 5  # Pause between days
+PAUSE_SECONDS = 20  # Pause between days
 MODEL_NAME = "LogisticsDelayModel"  # MLflow registered model name
 TARGET_COLUMN = "Logistics_Delay"
 
@@ -58,8 +58,8 @@ def get_monitoring_db_connection() -> psycopg2.extensions.connection:
 
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
-    user = os.getenv("POSTGRES_USER", "mlflow")
-    password = os.getenv("POSTGRES_PASSWORD", "mlflow")
+    user = os.getenv("POSTGRES_USER", "MLOps_Full_Postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "MLOps_Full_Postgres")
     database = MONITORING_DB
 
     conn_str = f"host={host} port={port} user={user} password={password} dbname={database}"
@@ -79,45 +79,75 @@ def create_monitoring_table(conn: psycopg2.extensions.connection) -> None:
     Args:
         conn: PostgreSQL connection object.
     """
-    with conn.cursor() as cur:
-        # Check if prediction_drift_score column exists, add it if not
-        cur.execute(
-            f"""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name='{MONITORING_TABLE}' AND column_name='prediction_drift_score'
-            """
-        )
-        has_prediction_drift = cur.fetchone() is not None
+    try:
+        # Rollback any previous failed transaction
+        conn.rollback()
 
-        cur.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {MONITORING_TABLE} (
-                id SERIAL PRIMARY KEY,
-                timestamp TIMESTAMP NOT NULL,
-                date DATE NOT NULL,
-                column_drift_score NUMERIC,
-                dataset_drift_score NUMERIC,
-                missing_values_share NUMERIC,
-                prediction_drift_score NUMERIC,
-                metric_details JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-
-        # Add prediction_drift_score column if table exists but column doesn't
-        if not has_prediction_drift:
-            try:
-                cur.execute(
-                    f"ALTER TABLE {MONITORING_TABLE} ADD COLUMN prediction_drift_score NUMERIC"
+        with conn.cursor() as cur:
+            # First, create the table if it doesn't exist
+            logger.info(f"Creating table '{MONITORING_TABLE}' if it doesn't exist...")
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {MONITORING_TABLE} (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP NOT NULL,
+                    date DATE NOT NULL,
+                    column_drift_score NUMERIC,
+                    dataset_drift_score NUMERIC,
+                    missing_values_share NUMERIC,
+                    prediction_drift_score NUMERIC,
+                    metric_details JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                logger.info("✓ Added prediction_drift_score column to existing table")
-            except Exception as e:
-                logger.debug(f"Column may already exist: {e}")
+                """
+            )
+            conn.commit()
+            logger.info(f"✓ Table '{MONITORING_TABLE}' created or already exists")
 
-        conn.commit()
-        logger.info(f"✓ Table '{MONITORING_TABLE}' is ready")
+            # Now check if prediction_drift_score column exists, add it if not
+            conn.rollback()  # Start fresh transaction for column check
+            cur.execute(
+                f"""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='{MONITORING_TABLE}' AND column_name='prediction_drift_score'
+                """
+            )
+            has_prediction_drift = cur.fetchone() is not None
+
+            # Add prediction_drift_score column if table exists but column doesn't
+            if not has_prediction_drift:
+                try:
+                    cur.execute(
+                        f"ALTER TABLE {MONITORING_TABLE} ADD COLUMN prediction_drift_score NUMERIC"
+                    )
+                    conn.commit()
+                    logger.info("✓ Added prediction_drift_score column to existing table")
+                except Exception as e:
+                    conn.rollback()
+                    logger.debug(f"Column may already exist: {e}")
+            else:
+                conn.rollback()  # Rollback the SELECT transaction
+
+            # Verify table exists
+            cur.execute(
+                f"""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = '{MONITORING_TABLE}'
+                )
+                """
+            )
+            table_exists = cur.fetchone()[0]
+            if not table_exists:
+                raise RuntimeError(f"Table '{MONITORING_TABLE}' was not created successfully")
+
+            logger.info(f"✓ Table '{MONITORING_TABLE}' is ready")
+    except Exception as e:
+        # Rollback on error to ensure connection is in a good state
+        conn.rollback()
+        logger.error(f"Failed to create monitoring table: {e}", exc_info=True)
+        raise
 
 
 def load_dataframe_from_s3(s3_key: str) -> pd.DataFrame:
@@ -499,26 +529,35 @@ def log_metrics_to_db(
     """
     import json
 
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""
-            INSERT INTO {MONITORING_TABLE} (
-                timestamp, date, column_drift_score, dataset_drift_score,
-                missing_values_share, prediction_drift_score, metric_details
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                timestamp,
-                date_str,
-                metrics.get("column_drift_score"),
-                metrics.get("dataset_drift_score"),
-                metrics.get("missing_values_share"),
-                metrics.get("prediction_drift_score"),
-                json.dumps(metrics.get("column_drift_scores", {})),
-            ),
-        )
-        conn.commit()
-        logger.info(f"✓ Logged metrics for {date_str} to database")
+    try:
+        # Rollback any previous failed transaction
+        conn.rollback()
+
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                INSERT INTO {MONITORING_TABLE} (
+                    timestamp, date, column_drift_score, dataset_drift_score,
+                    missing_values_share, prediction_drift_score, metric_details
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    timestamp,
+                    date_str,
+                    metrics.get("column_drift_score"),
+                    metrics.get("dataset_drift_score"),
+                    metrics.get("missing_values_share"),
+                    metrics.get("prediction_drift_score"),
+                    json.dumps(metrics.get("column_drift_scores", {})),
+                ),
+            )
+            conn.commit()
+            logger.info(f"✓ Logged metrics for {date_str} to database")
+    except Exception as e:
+        # Rollback on error to ensure connection is in a good state
+        conn.rollback()
+        logger.error(f"Failed to log metrics for {date_str}: {e}")
+        raise
 
 
 def run_monitoring() -> dict:
@@ -566,9 +605,14 @@ def run_monitoring() -> dict:
 
     # Step 6: Connect to monitoring database
     logger.info("Step 4: Connecting to monitoring database...")
-    conn = get_monitoring_db_connection()
-    create_monitoring_table(conn)
-    logger.info("✓ Database connection ready")
+    try:
+        conn = get_monitoring_db_connection()
+        logger.info("✓ Database connection established")
+        create_monitoring_table(conn)
+        logger.info("✓ Database connection ready")
+    except Exception as e:
+        logger.error(f"Failed to initialize database connection: {e}")
+        raise
 
     # Step 6: Process each day
     results = {

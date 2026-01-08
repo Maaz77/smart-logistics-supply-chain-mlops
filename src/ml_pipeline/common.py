@@ -102,8 +102,8 @@ def get_postgres_connection_string() -> str:
     """
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
-    user = os.getenv("POSTGRES_USER", "mlflow")
-    password = os.getenv("POSTGRES_PASSWORD", "mlflow")
+    user = os.getenv("POSTGRES_USER", "MLOps_Full_Postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "MLOps_Full_Postgres")
     database = os.getenv("POSTGRES_DB", "mlflow")
 
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
