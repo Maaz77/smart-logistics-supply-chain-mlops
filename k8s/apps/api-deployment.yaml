@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ${DOCKER_USER}/mlops-serving-api:7f32204
+        image: maazamin98/mlops-serving-api:7e4fdf8
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
