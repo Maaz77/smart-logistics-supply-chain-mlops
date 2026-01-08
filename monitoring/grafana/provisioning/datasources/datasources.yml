@@ -4,11 +4,11 @@ datasources:
   - name: Evidently_Monitoring
     type: postgres
     access: proxy
-    url: ${POSTGRES_HOST}:${POSTGRES_PORT}
-    database: ${POSTGRES_DATABASE}
-    user: ${POSTGRES_USER}
+    url: mlflow-postgres:5432
+    database: monitoring
+    user: mlflow
     secureJsonData:
-      password: ${POSTGRES_PASSWORD}
+      password: mlflow
     jsonData:
       sslmode: disable
       postgresVersion: 1500

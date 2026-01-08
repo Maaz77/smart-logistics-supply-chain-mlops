@@ -18,7 +18,7 @@
 .PHONY: help setup clean fix-style type-check test test-serving \
         infra-up infra-down ml-services-up ml-services-down s3-sync reset-infra \
         pipeline grafana-up grafana-down monitoring serving serving-down \
-        setup-k8s build-push deploy-k8s k8s-down argocd-password
+        setup-k8s build-push deploy-k8s down-k8s argocd-password
 
 # --- Configuration ---
 PYTHON_VERSION := 3.12
@@ -69,7 +69,7 @@ help: ## Show this help message
 	@grep -E '^(serving|serving-down):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Kubernetes:$(RESET)"
-	@grep -E '^(setup-k8s|build-push|deploy-k8s|k8s-down|argocd-password):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(setup-k8s|build-push|deploy-k8s|down-k8s|argocd-password):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-18s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 
 
@@ -258,10 +258,6 @@ grafana-up: ## Start Grafana services (initializes database and starts Grafana +
 	@./monitoring/scripts/init_monitoring_db.sh
 	@echo "$(GREEN)✓ Monitoring database ready$(RESET)"
 	@echo ""
-	@echo "$(CYAN)  Generating Grafana datasource configuration...$(RESET)"
-	@./monitoring/scripts/generate_datasource_config.sh
-	@echo "$(GREEN)✓ Datasource configuration ready$(RESET)"
-	@echo ""
 	@echo "$(CYAN)  Starting Grafana and Adminer...$(RESET)"
 	@$(COMPOSE_MONITORING) up -d --wait grafana adminer
 	@echo ""
@@ -347,11 +343,11 @@ serving-down: ## Stop model serving services (FastAPI + Streamlit UI)
 setup-k8s: ## Setup Kubernetes cluster (Kind) and install ArgoCD
 	@echo "$(BOLD)$(CYAN)☸️  Setting up Kubernetes Infrastructure$(RESET)"
 	@echo ""
-	@if [ ! -f "k8s/setup_k8s_mac.sh" ]; then \
-		echo "$(RED)✗ Setup script not found: k8s/setup_k8s_mac.sh$(RESET)"; \
+	@if [ ! -f "k8s/setup_k8s.sh" ]; then \
+		echo "$(RED)✗ Setup script not found: k8s/setup_k8s.sh$(RESET)"; \
 		exit 1; \
 	fi
-	@sh k8s/setup_k8s_mac.sh
+	@sh k8s/setup_k8s.sh
 
 build-push: ## Build and push Docker images to Docker Hub (prompts for DOCKER_USER if not provided)
 	@DOCKER_USER_VAR="$(DOCKER_USER)"; \
@@ -402,9 +398,24 @@ deploy-k8s: ## Deploy applications to Kubernetes cluster
 	@echo "$(GREEN)✓ Namespace ready$(RESET)"
 	@echo ""
 	@echo "$(CYAN)Step 2/2: Applying application manifests...$(RESET)"
+	@if [ -z "$(DOCKER_USER)" ] || [ "$(DOCKER_USER)" = "placeholder_user" ]; then \
+		echo "$(RED)✗ DOCKER_USER not set$(RESET)"; \
+		echo "  Set it via: $(CYAN)export DOCKER_USER=your_dockerhub_username$(RESET)"; \
+		echo "  Or pass it: $(CYAN)make deploy-k8s DOCKER_USER=your_dockerhub_username$(RESET)"; \
+		exit 1; \
+	fi
+	@echo "$(CYAN)  Using Docker Hub username: $(YELLOW)$(DOCKER_USER)$(RESET)"
 	@kubectl apply -f k8s/apps/model-config.yaml
-	@kubectl apply -f k8s/apps/api-deployment.yaml
-	@kubectl apply -f k8s/apps/ui-deployment.yaml
+	@# Substitute DOCKER_USER in deployment YAMLs before applying
+	@export DOCKER_USER=$(DOCKER_USER); \
+	if command -v envsubst >/dev/null 2>&1; then \
+		envsubst < k8s/apps/api-deployment.yaml | kubectl apply -f -; \
+		envsubst < k8s/apps/ui-deployment.yaml | kubectl apply -f -; \
+	else \
+		echo "$(YELLOW)⚠ envsubst not found, using sed fallback$(RESET)"; \
+		sed "s|\$${DOCKER_USER}|$(DOCKER_USER)|g" k8s/apps/api-deployment.yaml | kubectl apply -f -; \
+		sed "s|\$${DOCKER_USER}|$(DOCKER_USER)|g" k8s/apps/ui-deployment.yaml | kubectl apply -f -; \
+	fi
 	@echo ""
 	@echo "$(GREEN)✓ Deployment complete!$(RESET)"
 	@echo ""
@@ -416,41 +427,21 @@ deploy-k8s: ## Deploy applications to Kubernetes cluster
 	@echo "  • API: $(CYAN)kubectl port-forward svc/serving-api-service -n mlops-production 8002:8000$(RESET)"
 	@echo "  • UI: $(CYAN)kubectl port-forward svc/serving-ui-service -n mlops-production 8501:8501$(RESET)"
 
-k8s-down: ## Shut down Kubernetes applications and cluster (deletes deployments, services, and Kind cluster)
-	@echo "$(BOLD)$(CYAN)🛑 Shutting down Kubernetes applications and cluster$(RESET)"
+down-k8s: ## Shut down Kind Kubernetes cluster (deletes cluster and all resources including ArgoCD)
+	@echo "$(BOLD)$(CYAN)🛑 Shutting down Kind Kubernetes cluster$(RESET)"
 	@echo ""
 	@CLUSTER_NAME="modelserving-cluster"; \
-	if kubectl cluster-info &> /dev/null 2>&1; then \
-		echo "$(CYAN)Step 1/3: Deleting application resources...$(RESET)"; \
-		kubectl delete -f k8s/apps/api-deployment.yaml --ignore-not-found=true 2>/dev/null || true; \
-		kubectl delete -f k8s/apps/ui-deployment.yaml --ignore-not-found=true 2>/dev/null || true; \
-		echo "$(GREEN)✓ Application resources deleted$(RESET)"; \
-		echo ""; \
-		echo "$(CYAN)Step 2/3: Deleting namespace...$(RESET)"; \
-		kubectl delete namespace mlops-production --ignore-not-found=true --timeout=60s 2>/dev/null || true; \
-		echo "$(GREEN)✓ Namespace deleted$(RESET)"; \
-		echo ""; \
-		echo "$(CYAN)Step 3/3: Deleting Kind cluster '$$CLUSTER_NAME'...$(RESET)"; \
-		if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q "^$$CLUSTER_NAME$$"; then \
-			kind delete cluster --name "$$CLUSTER_NAME" 2>/dev/null || true; \
-			echo "$(GREEN)✓ Kind cluster deleted$(RESET)"; \
-		else \
-			echo "$(YELLOW)⚠ Cluster '$$CLUSTER_NAME' not found (may already be deleted)$(RESET)"; \
-		fi; \
+	if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q "^$$CLUSTER_NAME$$"; then \
+		echo "$(CYAN)Deleting Kind cluster '$$CLUSTER_NAME'...$(RESET)"; \
+		kind delete cluster --name "$$CLUSTER_NAME" 2>/dev/null || true; \
+		echo "$(GREEN)✓ Kind cluster deleted (all resources including ArgoCD removed)$(RESET)"; \
 	else \
-		echo "$(YELLOW)⚠ Kubernetes cluster not accessible$(RESET)"; \
-		echo "$(CYAN)Attempting to delete Kind cluster anyway...$(RESET)"; \
-		if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q "^$$CLUSTER_NAME$$"; then \
-			kind delete cluster --name "$$CLUSTER_NAME" 2>/dev/null || true; \
-			echo "$(GREEN)✓ Kind cluster deleted$(RESET)"; \
-		else \
-			echo "$(YELLOW)⚠ Cluster '$$CLUSTER_NAME' not found or kind not installed$(RESET)"; \
-		fi; \
+		echo "$(YELLOW)⚠ Cluster '$$CLUSTER_NAME' not found or kind not installed$(RESET)"; \
 	fi
 	@echo ""
 	@echo "$(GREEN)✓ Kubernetes shutdown complete!$(RESET)"
 
-argocd-password: ## Print ArgoCD admin password
+argocd-password: ## Print ArgoCD UI admin password
 	@echo "$(BOLD)$(CYAN)🔐 ArgoCD Admin Password$(RESET)"
 	@echo ""
 	@if ! kubectl cluster-info &> /dev/null; then \

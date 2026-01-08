@@ -56,24 +56,14 @@ services:
           sleep 2
         done
 
-        # Verify datasource config file exists (should be pre-generated on host)
+        # Verify datasource config file exists
         if [ -f /etc/grafana/provisioning/datasources/datasources.yml ]; then
           echo "✓ Datasource configuration file found"
           echo "  File: /etc/grafana/provisioning/datasources/datasources.yml"
           echo ""
-          echo "Configuration content:"
-          cat /etc/grafana/provisioning/datasources/datasources.yml
-          echo ""
-          echo "File permissions:"
-          ls -la /etc/grafana/provisioning/datasources/datasources.yml
-          echo ""
         else
           echo "⚠ Warning: Datasource configuration file not found!"
           echo "  Expected: /etc/grafana/provisioning/datasources/datasources.yml"
-          echo "  Run: ./monitoring/scripts/generate_datasource_config.sh"
-          echo ""
-          echo "Directory contents:"
-          ls -la /etc/grafana/provisioning/datasources/ 2>/dev/null || echo "  Directory does not exist"
           echo ""
         fi
 
